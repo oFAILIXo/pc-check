@@ -502,12 +502,21 @@
             Erklaerung   = @(
                 'vssadmin resize shadowstorage ändert, wie viel Platz Schattenkopien (daraus bestehen Wiederherstellungspunkte) auf dem Laufwerk belegen dürfen.',
                 '/for und /on: das Systemlaufwerk (meist C:); /maxsize=10% erlaubt bis zu 10 % der Laufwerksgröße.',
-                'Rückgängig setzt die alte Grenze wieder. Ist sie kleiner als der belegte Platz, löscht Windows dabei die ältesten Punkte.'
+                'Rückgängig setzt die alte Grenze wieder. Ist sie kleiner als der belegte Platz, löscht Windows dabei die ältesten Punkte.',
+                'Ist „Point-in-time restore“ von Windows 11 aktiv, setzt Windows die Grenze bei jedem Start auf dessen Einstellung zurück (Standard 2 %). Dann ändert Morpheus nichts und nennt den Weg über die Einstellungen.'
             )
         }
         Voraussetzung = {
             $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
             if (-not $admin) { return 'Administratorrechte fehlen.' }
+            # Point-in-time restore (Windows 11, seit 26100/26200.8737): „The maximum VSS limit equals the maximum usage
+            # configuration for point-in-time restore“ (learn.microsoft.com/windows/configuration/point-in-time-restore).
+            # Lokal nur über die Einstellungen oder MDM (Recovery-CSP) änderbar; vssadmin hielte nur bis zum nächsten Start.
+            $pitr = $null
+            try { $pitr = Get-ScheduledTask -TaskPath '\Microsoft\Windows\Setup\' -TaskName 'PITRTask' -ErrorAction Stop } catch { }
+            if ($pitr -and ([string]$pitr.State -ne 'Disabled')) {
+                return 'Windows verwaltet die Grenze über „Point-in-time restore“ und setzt sie bei jedem Start zurück. Bitte selbst einstellen: Einstellungen > System > Wiederherstellung > Point-in-time restore > Anzeigen oder bearbeiten, Regler auf etwa 10 %. Ist Point-in-time restore dort aus: sysdm.cpl > Computerschutz > Konfigurieren > Max. Belegung.'
+            }
             $iv = $null; $dis = $null
             try { $iv = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore' -Name 'RPSessionInterval' -ErrorAction Stop).RPSessionInterval } catch { }
             try { $dis = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\SystemRestore' -Name 'DisableSR' -ErrorAction Stop).DisableSR } catch { }
@@ -527,9 +536,13 @@
                 return [pscustomobject]@{ Aktiv = $true; Wert = 'unbegrenzt'; Zustand = [ordered]@{ Laufwerk = $lw; Max = 'UNBOUNDED' } }
             }
             $pct = [Math]::Round(100 * [double]$max / [double]$vol.Capacity, 1)
+            $wert = 'max {0:N1} GB ({1} %)' -f ([double]$max / 1GB), $pct
+            $pitr = $null
+            try { $pitr = Get-ScheduledTask -TaskPath '\Microsoft\Windows\Setup\' -TaskName 'PITRTask' -ErrorAction Stop } catch { }
+            if ($pitr -and ([string]$pitr.State -ne 'Disabled')) { $wert += ', verwaltet von Point-in-time restore (Einstellungen > System > Wiederherstellung)' }
             # Ziel erreicht ab 8 % (die Aktion setzt 10 %). Der Zustand zählt in ganzen MB: Windows speichert die Grenze
             # gerundet, bytegenau würde die Kontrolle nach dem Rückgängigmachen fälschlich abweichen.
-            [pscustomobject]@{ Aktiv = ($pct -ge 8); Wert = ('max {0:N1} GB ({1} %)' -f ([double]$max / 1GB), $pct); Zustand = [ordered]@{ Laufwerk = $lw; Max = ('{0}MB' -f [Math]::Floor([double]$max / 1MB)) } }
+            [pscustomobject]@{ Aktiv = ($pct -ge 8); Wert = $wert; Zustand = [ordered]@{ Laufwerk = $lw; Max = ('{0}MB' -f [Math]::Floor([double]$max / 1MB)) } }
         }
         Ausfuehren = {
             param($Variante)

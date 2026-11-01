@@ -948,7 +948,7 @@ function Invoke-GuiUpdatesInstall {
     $text = "Diese Programme mit winget aktualisieren?`n`n" + (@($zeilen) -join "`n") + "`n`nProgramm-Updates lassen sich nicht über 'Änderungen' zurücknehmen. "
     if ($op) { $text += "`n`nACHTUNG: OHNE Wiederherstellungspunkt. Windows konnte eben keinen anlegen. Fortfahren nur, wenn du das bewusst so willst. " }
     else { $text += 'Vorher wird ein Wiederherstellungspunkt angelegt. ' }
-    $text += "winget lädt aus den Herstellerquellen und nimmt die Lizenzbedingungen der Pakete an.`n`nHast du das gerade nicht selbst in Morpheus angeklickt, wähle 'Nein'."
+    $text += "winget lädt aus den Herstellerquellen und nimmt die Lizenzbedingungen der Pakete an.`n`nwinget läuft ohne Adminrechte. Braucht ein Programm Adminrechte, fragt Windows danach selbst; dort den Herausgeber prüfen.`n`nHast du das gerade nicht selbst in Morpheus angeklickt, wähle 'Nein'."
     # Pakete kommen aus der Liste des Servers, nie aus dem Body
     $pakete = @(foreach ($u in $gewaehlt) { [pscustomobject][ordered]@{ id = [string]$u.id; name = [string]$u.name; von = [string]$u.installiert; auf = [string]$u.verfuegbar } })
     $json = ConvertTo-Json -InputObject @($pakete) -Compress

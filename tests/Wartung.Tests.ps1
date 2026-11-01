@@ -46,6 +46,8 @@ if (-not (Get-Command -Name Get-MorpheusWingetErgebnis -ErrorAction SilentlyCont
 }
 
 $script:CmdExe = Join-Path ([Environment]::GetFolderPath('System')) 'cmd.exe'
+# Standard-Eintrag WingetBenutzer (vor dem Ersetzen durch Attrappen) für den Test „kein Rückfall“
+$script:WartungImplWingetBenutzerEcht = $script:MorpheusWartungImpl.WingetBenutzer
 
 # Attrappen für Prozess, Punkt, Ohne, WingetPfad, Jetzt
 function Set-FakeWartung {
@@ -61,10 +63,22 @@ function Set-FakeWartung {
     $script:ProzessHook = $null
     $script:WingetPfad = 'C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.0_x64__8wekyb3d8bbwe\winget.exe'
     $script:WingetGrund = 'winget fehlt.'
+    $script:BenutzerFehler = $null
     $script:MorpheusWartungImpl = @{
+        # winget ohne Adminrechte (2.5): gleiche Steuervariablen wie Prozess, Aufruf mit Benutzer = $true
+        WingetBenutzer = {
+            param($Datei, $Argumente, $ZeitlimitSek, $Zeile)
+            [void]$script:Aufrufe.Add([pscustomobject]@{ Datei = $Datei; Argumente = $Argumente; Kodierung = $null; AbbruchDatei = $null; ZeitlimitSek = $ZeitlimitSek; Benutzer = $true })
+            if ($script:ProzessWerfen) { throw $script:ProzessWerfen }
+            if ($script:ProzessHook) { & $script:ProzessHook $script:Aufrufe.Count $Argumente }
+            foreach ($z in @($script:ProzessZeilen)) { if ($Zeile) { & $Zeile $z } }
+            $ex = $script:ProzessExit
+            if ($script:BenutzerFehler) { $ex = $null }
+            [pscustomobject]@{ exitCode = $ex; text = (@($script:ProzessZeilen) -join "`n"); abgebrochen = $false; zeitueberschritten = $script:ProzessZeit; dauerSek = 7; benutzerkontext = $true; fehler = $script:BenutzerFehler }
+        }
         Prozess    = {
             param($Datei, $Argumente, $Kodierung, $AbbruchDatei, $ZeitlimitSek, $Zeile)
-            [void]$script:Aufrufe.Add([pscustomobject]@{ Datei = $Datei; Argumente = $Argumente; Kodierung = $Kodierung; AbbruchDatei = $AbbruchDatei; ZeitlimitSek = $ZeitlimitSek })
+            [void]$script:Aufrufe.Add([pscustomobject]@{ Datei = $Datei; Argumente = $Argumente; Kodierung = $Kodierung; AbbruchDatei = $AbbruchDatei; ZeitlimitSek = $ZeitlimitSek; Benutzer = $false })
             if ($script:ProzessWerfen) { throw $script:ProzessWerfen }
             if ($script:ProzessHook) { & $script:ProzessHook $script:Aufrufe.Count $Argumente }
             foreach ($z in @($script:ProzessZeilen)) { if ($Zeile) { & $Zeile $z } }
@@ -487,7 +501,8 @@ Describe 'Invoke-MorpheusWartung: winget' {
         $script:Aufrufe[0].Datei | Should Be $script:WingetPfad
         $script:Aufrufe[0].Argumente | Should Match '--id Demo\.App '
         $script:Aufrufe[1].Argumente | Should Match '--id Other\.Tool '
-        $script:Aufrufe[0].Kodierung | Should Be 'utf8'
+        $script:Aufrufe[0].Benutzer | Should Be $true
+        $script:Aufrufe[1].Benutzer | Should Be $true
         $script:Aufrufe[0].ZeitlimitSek | Should Be 1800
         $j = @(Get-TestJournal $script:dr)
         $j.Count | Should Be 2
@@ -719,8 +734,8 @@ Describe 'Invoke-MorpheusWartungProzess (echte, harmlose Prozesse)' {
     }
 }
 
-# WinGet-Ordner (W11/G3): Attrappen der beiden Funktionen, keine echten Ordner
-Describe 'Invoke-MorpheusWartung: winget, WinGet-Ordner' {
+# winget ohne Adminrechte (2.5, #67, G3): Attrappe WingetBenutzer, kein echtes winget, keine Aufgabenplanung
+Describe 'Invoke-MorpheusWartung: winget ohne Adminrechte' {
     BeforeEach {
         Set-FakeWartung
         $script:dr = Join-Path $TestDrive ('d' + [guid]::NewGuid().ToString('N'))
@@ -728,54 +743,59 @@ Describe 'Invoke-MorpheusWartung: winget, WinGet-Ordner' {
             @{ id = 'Demo.App'; name = 'Demo App'; von = '1.0'; auf = '1.1' },
             [pscustomobject]@{ id = 'Other.Tool'; name = 'Other Tool'; von = '2.0'; auf = '2.5' }
         )
-        $script:Reihenfolge = New-Object System.Collections.ArrayList
-        $script:InitOk = $true
-        $script:TestGehalten = $true
-        Mock Initialize-MorpheusWingetOrdner {
-            [void]$script:Reihenfolge.Add('init')
-            [pscustomobject]@{ pfad = 'X:\t\WinGet'; ok = $script:InitOk; meldung = $(if ($script:InitOk) { 'angelegt' } else { 'Zugriff verweigert' }) }
-        }
-        Mock Test-MorpheusWingetOrdner {
-            [void]$script:Reihenfolge.Add('test')
-            if ($script:TestGehalten) {
-                [pscustomobject]@{ pfad = 'X:\t\WinGet'; vorhanden = $true; gehalten = $true; konten = @(); text = 'WinGet-Ordner: Rechte gehalten (nur Administratoren und SYSTEM).' }
-            } else {
-                [pscustomobject]@{ pfad = 'X:\t\WinGet'; vorhanden = $true; gehalten = $false; konten = @('VORDEFINIERT\Benutzer'); text = 'WinGet hat den Ordner für VORDEFINIERT\Benutzer freigegeben.' }
-            }
-        }
-        $script:ProzessHook = { param($n, $argz) [void]$script:Reihenfolge.Add('winget' + $n) }
     }
-    It 'Ordner wird nach dem Punkt und vor dem ersten Paket vorbereitet, danach geprüft; Feld wingetOrdner gehalten' {
+    It 'alle Pakete laufen über WingetBenutzer, nie über den Admin-Runner; Feld benutzerkontext und Hinweis' {
         $r = Invoke-Wartung @{ DataRoot = $script:dr; Werkzeug = 'winget.upgrade'; Pakete = $script:pak }
         $r.status | Should Be 'erledigt'
-        ($script:Reihenfolge -join ',') | Should Be 'init,winget1,winget2,test'
-        $r.wingetOrdner.gehalten | Should Be $true
-        @($r.wingetOrdner.konten).Count | Should Be 0
-        $r.wingetOrdner.text | Should Be 'WinGet-Ordner: Rechte gehalten (nur Administratoren und SYSTEM).'
-        (@($r.zusammenfassung.details) -contains $r.wingetOrdner.text) | Should Be $true
-        (@($script:Log | Where-Object { $_ -like '*WinGet-Ordner: Rechte gehalten (nur Administratoren und SYSTEM).' })).Count | Should Be 1
-    }
-    It 'freigegebener Ordner: Feld mit Konten, Log-Zeile und Detail; Status der Pakete bleibt' {
-        $script:TestGehalten = $false
-        $r = Invoke-Wartung @{ DataRoot = $script:dr; Werkzeug = 'winget.upgrade'; Pakete = $script:pak }
-        $r.status | Should Be 'erledigt'
-        $r.wingetOrdner.gehalten | Should Be $false
-        $r.wingetOrdner.konten[0] | Should Be 'VORDEFINIERT\Benutzer'
-        (@($script:Log | Where-Object { $_ -like '*WinGet hat den Ordner für VORDEFINIERT\Benutzer freigegeben.' })).Count | Should Be 1
-        (@($r.zusammenfassung.details) -contains 'WinGet hat den Ordner für VORDEFINIERT\Benutzer freigegeben.') | Should Be $true
-    }
-    It 'Vorbereitung scheitert: Log-Zeile, winget läuft trotzdem' {
-        $script:InitOk = $false
-        $r = Invoke-Wartung @{ DataRoot = $script:dr; Werkzeug = 'winget.upgrade'; Pakete = $script:pak }
-        $r.status | Should Be 'erledigt'
+        $r.benutzerkontext | Should Be $true
         $script:Aufrufe.Count | Should Be 2
-        (@($script:Log | Where-Object { $_ -like '*WinGet-Ordner ließ sich nicht vorbereiten: Zugriff verweigert' })).Count | Should Be 1
-        $r.wingetOrdner | Should Not BeNullOrEmpty
+        @($script:Aufrufe | Where-Object { -not $_.Benutzer }).Count | Should Be 0
+        (@($r.zusammenfassung.details) -contains 'winget lief ohne Adminrechte (Benutzerkontext).') | Should Be $true
+        (@($script:Log | Where-Object { $_ -like '*winget läuft ohne Adminrechte*' })).Count | Should Be 1
+        (@($script:Log | Where-Object { $_ -like '*WinGet-Ordner*' })).Count | Should Be 0
     }
-    It 'ohne Punkt (punkt-fehlt): Ordner wird nicht angefasst' {
+    It 'kein Ergebnis aus dem Benutzerkontext: Paket fehlgeschlagen mit Grund, Journal fehlgeschlagen' {
+        $script:BenutzerFehler = 'Die Aufgabe ohne Adminrechte endete, bevor winget Ausgaben geschickt hat.'
+        $r = Invoke-Wartung @{ DataRoot = $script:dr; Werkzeug = 'winget.upgrade'; Pakete = $script:pak }
+        $r.status | Should Be 'fehlgeschlagen'
+        $r.pakete[0].status | Should Be 'fehlgeschlagen'
+        $r.pakete[0].text | Should Be $script:BenutzerFehler
+        $r.pakete[0].exitCode | Should BeNullOrEmpty
+        @(Get-TestJournal $script:dr)[0].status | Should Be 'fehlgeschlagen'
+    }
+    It 'Start wirft: Paket fehlgeschlagen, das nächste wird trotzdem versucht' {
+        $script:ProzessHook = { param($n, $argz) if ($n -eq 1) { throw 'Aufgabenplanung nicht erreichbar' } }
+        $r = Invoke-Wartung @{ DataRoot = $script:dr; Werkzeug = 'winget.upgrade'; Pakete = $script:pak }
+        $r.pakete[0].status | Should Be 'fehlgeschlagen'
+        $r.pakete[0].text | Should Match 'Aufgabenplanung nicht erreichbar'
+        $r.pakete[1].status | Should Be 'aktualisiert'
+    }
+    It 'Zeitlimit: Paket fehlgeschlagen' {
+        $script:ProzessZeit = $true
+        $r = Invoke-Wartung @{ DataRoot = $script:dr; Werkzeug = 'winget.upgrade'; Pakete = @($script:pak[0]) }
+        $r.pakete[0].status | Should Be 'fehlgeschlagen'
+        $r.pakete[0].text | Should Match 'Zeitlimit'
+    }
+    It 'Standard-Eintrag ohne WingetBenutzer.ps1: wirft statt winget mit Adminrechten zu starten' {
+        $echt = $script:WartungImplWingetBenutzerEcht
+        $echt | Should Not BeNullOrEmpty
+        $text = $echt.ToString()
+        $text | Should Match 'Invoke-MorpheusWingetBenutzer'
+        $text | Should Match 'throw'
+        $text | Should Not Match 'Invoke-MorpheusWartungProzess'
+    }
+    It 'Punkt fehlt: nichts gestartet' {
         $script:PunktFehler = 'kein Punkt'
         $r = Invoke-Wartung @{ DataRoot = $script:dr; Werkzeug = 'winget.upgrade'; Pakete = $script:pak }
         $r.status | Should Be 'punkt-fehlt'
-        $script:Reihenfolge.Count | Should Be 0
+        $script:Aufrufe.Count | Should Be 0
+    }
+}
+
+Describe 'Wartung.ps1 nutzt keine Option-(c)-Funktionen mehr' {
+    It 'kein Initialize-/Test-MorpheusWingetOrdner und kein Feld wingetOrdner' {
+        $text = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\gui\lib\Wartung.ps1'))
+        $text | Should Not Match 'MorpheusWingetOrdner'
+        $text | Should Not Match 'wingetOrdner'
     }
 }

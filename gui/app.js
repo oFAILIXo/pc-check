@@ -13,15 +13,34 @@ const GAMING_CHECKS = ['Bildschirme und Bildwiederholrate', 'Grafikkarte und Tre
   'Spielebibliotheken', 'Spielmodus', 'Hardwarebeschleunigte GPU-Planung (HAGS)', 'Hintergrundaufzeichnung (Game DVR)', 'Optimierungen für Spiele im Fenstermodus',
   'Overlays und Hintergrund-Tools', 'Mausbeschleunigung', 'Netzwerkverbindung', 'Netzwerkkarte: Energiesparfunktionen', 'Virtualisierung und Spieleleistung'];
 const REPORT_RE = /^pc-check_\d{4}-\d{2}-\d{2}_\d{4}$/;
+// Menütexte zentral (2.5, #65): Für die englische Oberfläche (#66) wird nur dieses Objekt übersetzt.
+const MENU_TEXTE = {
+  gruppen: { bereiche: 'Bereiche', verwalten: 'Verwalten' },
+  punkte: { uebersicht: 'Übersicht', sicherheit: 'Sicherheit', leistung: 'Leistung', gaming: 'Gaming', stabilitaet: 'Stabilität', alle: 'Alle Prüfungen',
+    checkliste: 'Checkliste', aenderungen: 'Änderungen', werkzeuge: 'Werkzeuge', berichte: 'Berichte', scan: 'Neuer Scan', rohdaten: 'Rohdaten', einstellungen: 'Einstellungen' },
+  unter: { gamingCheck: 'Gaming-Check', wartung: 'Wartung & Reparatur', defender: 'Microsoft Defender', updates: 'Programme aktualisieren',
+    sysinternals: 'Sysinternals', spieleOrdner: 'Eigene Spiele-Ordner', keinBericht: 'Kategorien nach dem ersten Scan' },
+  filter: { problem: 'Nur Probleme', CRIT: 'Kritisch', WARN: 'Warnungen', TIPP: 'Tipps', ACK: 'Akzeptiert', SKIP: 'Nicht geprüft' },
+  // Reihenfolge wie in der Karte „Wartung & Reparatur“
+  werkzeuge: [['wiederherstellung.punkt', 'Wiederherstellungspunkt'], ['dism.checkhealth', 'DISM: schnell prüfen'], ['dism.scanhealth', 'DISM: gründlich prüfen'],
+    ['dism.restorehealth', 'DISM: reparieren'], ['sfc.scannow', 'SFC: Systemdateien'], ['dism.analyze', 'WinSxS analysieren'], ['dism.cleanup', 'WinSxS bereinigen'],
+    ['chkdsk.scan', 'Datenträger prüfen'], ['perfmon.rel', 'Zuverlässigkeitsverlauf'], ['dns.flush', 'DNS-Speicher leeren'], ['trim', 'SSD optimieren (TRIM)'],
+    ['zeit.resync', 'Uhrzeit synchronisieren'], ['powercfg.energy', 'Energiebericht'], ['powercfg.akku', 'Akkubericht'], ['powercfg.schlaf', 'Schlafstudie']],
+  aria: { nav: 'Hauptnavigation', auf: 'Unterpunkte von {0} einblenden', zu: 'Unterpunkte von {0} ausblenden' },
+};
+const MT = MENU_TEXTE.punkte;
+// kinder: 'kategorien' (aus dem Bericht), 'filter' (Status-Filter), 'werkzeuge' (Karten und Einzelwerkzeuge)
 const NAV = [
-  { id: 'uebersicht', label: 'Übersicht', icon: 'home' }, { group: 'Bereiche' },
-  { id: 'sicherheit', label: 'Sicherheit', icon: 'shield', badge: true }, { id: 'leistung', label: 'Leistung', icon: 'gauge', badge: true },
-  { id: 'gaming', label: 'Gaming', icon: 'pad', badge: true }, { id: 'stabilitaet', label: 'Stabilität', icon: 'pulse', badge: true },
-  { id: 'alle', label: 'Alle Prüfungen', icon: 'list' }, { group: 'Verwalten' },
-  { id: 'checkliste', label: 'Checkliste', icon: 'check' }, { id: 'aenderungen', label: 'Änderungen', icon: 'undo' }, { id: 'werkzeuge', label: 'Werkzeuge', icon: 'tool' },
-  { id: 'berichte', label: 'Berichte', icon: 'doc' }, { id: 'scan', label: 'Neuer Scan', icon: 'scan' },
-  { id: 'rohdaten', label: 'Rohdaten', icon: 'db' }, { id: 'einstellungen', label: 'Einstellungen', icon: 'gear' },
+  { id: 'uebersicht', label: MT.uebersicht, icon: 'home' }, { group: MENU_TEXTE.gruppen.bereiche },
+  { id: 'sicherheit', label: MT.sicherheit, icon: 'shield', badge: true, kinder: 'kategorien' }, { id: 'leistung', label: MT.leistung, icon: 'gauge', badge: true, kinder: 'kategorien' },
+  { id: 'gaming', label: MT.gaming, icon: 'pad', badge: true, kinder: 'kategorien' }, { id: 'stabilitaet', label: MT.stabilitaet, icon: 'pulse', badge: true, kinder: 'kategorien' },
+  { id: 'alle', label: MT.alle, icon: 'list', kinder: 'filter' }, { group: MENU_TEXTE.gruppen.verwalten },
+  { id: 'checkliste', label: MT.checkliste, icon: 'check' }, { id: 'aenderungen', label: MT.aenderungen, icon: 'undo' }, { id: 'werkzeuge', label: MT.werkzeuge, icon: 'tool', kinder: 'werkzeuge' },
+  { id: 'berichte', label: MT.berichte, icon: 'doc' }, { id: 'scan', label: MT.scan, icon: 'scan' },
+  { id: 'rohdaten', label: MT.rohdaten, icon: 'db' }, { id: 'einstellungen', label: MT.einstellungen, icon: 'gear' },
 ];
+const NAV_KEY = 'morpheusNavAuf';
+const NAV_STANDARD_AUF = { 'werkzeuge/wartung': true };   // Einzelwerkzeuge sofort sichtbar, sobald „Werkzeuge“ offen ist
 const CAT_VIEWS = ['sicherheit', 'leistung', 'gaming', 'stabilitaet', 'alle'];
 const LIVE_MS = 5000;
 const SB_KEY = 'pcCheckStatusbar';
@@ -232,7 +251,8 @@ function refreshActionStates() {
       const r = await api('/api/actions/refresh', { method: 'POST' });
       if (r && r.jobId) await followJob(r.jobId, () => {});
       await loadActions();
-      refreshView();
+      // „Werkzeuge“ zeigt keine Anpassungen; neu zeichnen würde die Karten neu laden und die Position verschieben (2.5, #65)
+      if (S.view === 'werkzeuge') renderNav(); else refreshView();
     } catch (e) { if (e.status === 401) throw e; /* ohne Zustände weiter (Mock, Nur-Lesen ohne Safety) */ }
     finally { statesRun = null; }
   })();
@@ -684,18 +704,186 @@ function badgeFor(id) {
   if (!n) return null;
   return h('span', { class: 'cnt ' + (c.CRIT ? 'c' : c.WARN ? 'w' : 't'), title: `${c.CRIT} kritisch, ${c.WARN} Warnungen, ${c.TIPP} Tipps`, text: String(n) });
 }
+// ---- Aufklappbares Menü (2.5, #65): Bereiche klappen Kategorien, Filter bzw. Werkzeuge auf; Zustand je Benutzer in localStorage
+function navLaden() {
+  try { const o = JSON.parse(localStorage.getItem(NAV_KEY) || '{}'); return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {}; } catch { return {}; }
+}
+function navIstAuf(key) {
+  if (!S.navAuf) S.navAuf = navLaden();
+  return Object.prototype.hasOwnProperty.call(S.navAuf, key) ? S.navAuf[key] === true : !!NAV_STANDARD_AUF[key];
+}
+function navUmschalten(key, auf) {
+  const neu = auf == null ? !navIstAuf(key) : !!auf;
+  if (!S.navAuf) S.navAuf = navLaden();
+  S.navAuf[key] = neu;
+  try { localStorage.setItem(NAV_KEY, JSON.stringify(S.navAuf)); } catch { /* ohne Speicher weiter */ }
+  const item = [...document.querySelectorAll('#nav .nv-item')].find(x => x.dataset.key === key);
+  if (!item) return;
+  const btn = item.querySelector(':scope > .nv-row > .nv-tog'), sub = item.querySelector(':scope > .nv-sub');
+  item.classList.toggle('auf', neu);
+  if (sub) sub.hidden = !neu;
+  if (btn) { btn.setAttribute('aria-expanded', neu ? 'true' : 'false'); btn.setAttribute('aria-label', (neu ? MENU_TEXTE.aria.zu : MENU_TEXTE.aria.auf).replace('{0}', () => btn.dataset.label)); }
+}
+/** Unterpunkte: [{ key, label, view, ziel?: { sel } | { kat } | { wt }, filter?, kinder?, leer? }] */
+function navKinder(n) {
+  if (n.kinder === 'kategorien') {
+    if (!S.report) return [{ key: n.id + '/leer', label: MENU_TEXTE.unter.keinBericht, view: n.id, leer: true }];
+    const kats = [];
+    S.findings.forEach(f => { if (viewOf(f) === n.id && !kats.includes(f.Category)) kats.push(f.Category); });
+    const out = kats.map(k => ({ key: n.id + '/kat/' + k, label: k, view: n.id, ziel: { kat: k } }));
+    if (n.id === 'gaming' && GAMING_CHECKS.some(c => findingByCheck(c))) out.unshift({ key: 'gaming/check', label: MENU_TEXTE.unter.gamingCheck, view: 'gaming', ziel: { sel: '#gaming-check' } });
+    return out;
+  }
+  if (n.kinder === 'filter') return Object.entries(MENU_TEXTE.filter).map(([m, l]) => ({ key: 'alle/filter/' + m, label: l, view: 'alle', filter: m }));
+  if (n.kinder === 'werkzeuge') {
+    const u = MENU_TEXTE.unter;
+    return [
+      { key: 'werkzeuge/wartung', label: u.wartung, view: 'werkzeuge', ziel: { sel: '#wartung-card' },
+        kinder: MENU_TEXTE.werkzeuge.map(([id, l]) => ({ key: 'werkzeuge/wt/' + id, label: l, view: 'werkzeuge', ziel: { wt: id } })) },
+      { key: 'werkzeuge/defender', label: u.defender, view: 'werkzeuge', ziel: { sel: '#def-card' } },
+      { key: 'werkzeuge/updates', label: u.updates, view: 'werkzeuge', ziel: { sel: '#upd-card' } },
+      { key: 'werkzeuge/sysinternals', label: u.sysinternals, view: 'werkzeuge', ziel: { sel: '#sys-card' } },
+      { key: 'werkzeuge/spiele', label: u.spieleOrdner, view: 'werkzeuge', ziel: { sel: '#spo-card' } },
+    ];
+  }
+  return [];
+}
+/** Klick auf einen Unterpunkt: Ansicht öffnen, Filter setzen bzw. zum Ziel springen */
+function navGehe(k) {
+  S.ui.navSub = k.leer ? null : k.key;
+  let neuZeichnen = false;
+  if (k.filter) { const f = uiF('alle'); neuZeichnen = f.mode !== k.filter || !!f.term; S.ui.f.alle = { mode: k.filter, term: '' }; }
+  if (k.ziel) {
+    S.ui.navZiel = k.ziel;
+    // Eine Kategorie ist nur sichtbar, wenn Filter und Suche sie nicht ausblenden
+    if (k.ziel.kat) { const f = uiF(k.view); neuZeichnen = f.mode !== 'all' || !!f.term; S.ui.f[k.view] = { mode: 'all', term: '' }; }
+  }
+  if (location.hash === '#/' + k.view) {
+    // Gleiche Ansicht: nicht neu zeichnen (Karten wie „Wartung & Reparatur“ würden neu laden und das Ziel verschieben),
+    // nur Menü markieren und springen. Neu gezeichnet wird nur, wenn ein Filter das Ziel ausblendet.
+    if (neuZeichnen) refreshView(); else renderNav();
+    navZielZeigen();
+  } else { S.ui.navSubNeu = true; location.hash = '#/' + k.view; }
+}
+function navZielSuchen(z) {
+  if (z.sel) return $(z.sel);
+  if (z.kat) return [...document.querySelectorAll('#view .section-title[data-kat]')].find(x => x.dataset.kat === z.kat) || null;
+  if (z.wt) return z.wt === WT_PUNKT_ID ? $('#wt-punkt') : ([...document.querySelectorAll('#view .wt-row[data-id]')].find(x => x.dataset.id === z.wt) || null);
+  return null;
+}
+// Scrollt so, dass das Ziel um seinen scroll-margin-top unter der Oberkante steht. Bewusst nicht scrollIntoView:
+// Im Edge-App-Fenster landete das bei Sprüngen innerhalb einer Ansicht teils am Seitenende (Mock-Test 2.5).
+function navScrollZu(el) {
+  const soll = parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
+  window.scrollTo({ top: Math.max(0, Math.round(window.scrollY + el.getBoundingClientRect().top - soll)), behavior: 'instant' });
+  return soll;
+}
+let navHalten = null;
+function navHaltenStopp() {
+  if (!navHalten) return;
+  clearInterval(navHalten.timer);
+  ['wheel', 'touchstart', 'keydown', 'mousedown'].forEach(t => window.removeEventListener(t, navHaltenStopp, true));
+  navHalten = null;
+}
+/** Springt zum gemerkten Ziel. Werkzeuge laden nach: Das Ziel kann erst später entstehen (bis 30 Versuche à 150 ms) und durch
+ *  nachgeladene Karten darüber verschoben werden. Deshalb hält ein Wächter es bis zu 8 s an seinem Platz, bis der Nutzer selbst
+ *  scrollt, klickt oder tippt. */
+function navZielZeigen(versuch = 0) {
+  const z = S.ui.navZiel; if (!z) return;
+  const el = navZielSuchen(z);
+  if (!el) {
+    if (versuch < 30) setTimeout(() => { if (S.ui.navZiel === z) navZielZeigen(versuch + 1); }, 150);
+    else S.ui.navZiel = null;
+    return;
+  }
+  S.ui.navZiel = null;
+  navHaltenStopp();
+  navScrollZu(el);
+  if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1');
+  el.focus({ preventScroll: true });
+  el.classList.remove('nv-flash'); void el.offsetWidth; el.classList.add('nv-flash');
+  const start = Date.now(), view = S.view;
+  navHalten = { timer: setInterval(() => {
+    if (Date.now() - start > 8000 || S.view !== view) { navHaltenStopp(); return; }
+    const ziel = el.isConnected ? el : navZielSuchen(z);
+    if (!ziel) return;
+    const soll = parseFloat(getComputedStyle(ziel).scrollMarginTop) || 0, ist = ziel.getBoundingClientRect().top;
+    const amEnde = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+    if (Math.abs(ist - soll) > 6 && !(amEnde && ist > soll)) navScrollZu(ziel);
+  }, 120) };
+  ['wheel', 'touchstart', 'keydown', 'mousedown'].forEach(t => window.addEventListener(t, navHaltenStopp, true));
+}
+let navUid = 0;
+function navEintrag(e) {
+  const hat = !!(e.kinder && e.kinder.length), auf = hat && navIstAuf(e.key), subId = 'nv-sub-' + (++navUid);
+  const link = h('a', { href: e.href, class: 'nv-link' + (e.aktiv ? ' on' : '') + (e.leer ? ' leer' : ''), 'aria-current': e.aktiv ? (e.ebene ? 'location' : 'page') : null, onclick: e.onclick },
+    e.ic ? icon(e.ic) : null, h('span', { class: 'nv-label', text: e.label }), e.badge);
+  const tog = hat ? h('button', { type: 'button', class: 'nv-tog', 'aria-expanded': auf ? 'true' : 'false', 'aria-controls': subId, 'data-label': e.label,
+    'aria-label': (auf ? MENU_TEXTE.aria.zu : MENU_TEXTE.aria.auf).replace('{0}', () => e.label), onclick: () => navUmschalten(e.key) }, icon('chev')) : null;
+  const item = h('div', { class: 'nv-item lv' + e.ebene + (auf ? ' auf' : ''), 'data-key': e.key }, h('div', { class: 'nv-row' }, link, tog));
+  if (hat) item.append(h('div', { class: 'nv-sub', id: subId, role: 'group', 'aria-label': e.label, hidden: !auf }, e.kinder.map(navEintrag)));
+  return item;
+}
+function navUnter(k, ebene) {
+  const aktiv = S.view === k.view && !k.leer && (k.filter ? uiF('alle').mode === k.filter : S.ui.navSub === k.key);
+  return { key: k.key, label: k.label, href: '#/' + k.view, aktiv, ebene, leer: k.leer, kinder: k.kinder ? k.kinder.map(x => navUnter(x, ebene + 1)) : null,
+    onclick: ev => { ev.preventDefault(); navGehe(k); } };
+}
 function renderNav() {
   const sess = S.session || {};
+  const fokus = document.activeElement && document.activeElement.closest && document.activeElement.closest('#nav .nv-item');
+  const fokusKey = fokus ? fokus.dataset.key : null, fokusTog = !!(fokusKey && document.activeElement.classList.contains('nv-tog'));
+  navUid = 0;
   $('#nav').replaceChildren(h('div', { class: 'navgroup' }, NAV.map(n => {
     if (n.group) return h('div', { class: 'navh', text: n.group });
     let b = null;
     if (n.badge) b = badgeFor(n.id);
     else if (n.id === 'berichte') b = S.reports.length ? h('span', { class: 'cnt n', text: String(S.reports.length) }) : null;
     else if (n.id === 'checkliste') { const k = Object.keys(S.checklist).length; b = k ? h('span', { class: 'cnt i', text: String(k) }) : null; }
-    return h('a', { href: '#/' + n.id, class: S.view === n.id ? 'on' : '', 'aria-current': S.view === n.id ? 'page' : null }, icon(n.icon), n.label, b);
+    const kinder = n.kinder ? navKinder(n).map(k => navUnter(k, 1)) : null;
+    // Klick auf den Bereich öffnet die Ansicht und klappt ihn auf (wie im Azure Portal)
+    return navEintrag({ key: n.id, label: n.label, href: '#/' + n.id, ic: n.icon, badge: b, aktiv: S.view === n.id, ebene: 0, kinder,
+      onclick: () => { if (kinder && kinder.length && !navIstAuf(n.id)) navUmschalten(n.id, true); S.ui.navSub = null; } });
   })));
+  if (fokusKey) {
+    const it = [...document.querySelectorAll('#nav .nv-item')].find(x => x.dataset.key === fokusKey);
+    const ziel = it && it.querySelector(fokusTog ? ':scope > .nv-row > .nv-tog' : ':scope > .nv-row > a');
+    if (ziel) ziel.focus({ preventScroll: true });
+  }
   $('#side-foot').replaceChildren(h('span', { class: 'dot' }), `${sess.pc || ''}${sess.version ? ' · v' + sess.version : ''}${sess.admin ? ' · Admin' : ''}`);
   updateChrome();
+}
+/** Tastatur: Pfeil hoch/runter wandert durch die sichtbaren Einträge, rechts klappt auf bzw. geht zum ersten Unterpunkt, links klappt zu bzw. geht zum Oberpunkt */
+function initNav() {
+  const nav = $('#nav');
+  nav.setAttribute('aria-label', MENU_TEXTE.aria.nav);
+  nav.addEventListener('keydown', ev => {
+    if (ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+    const item = ev.target.closest && ev.target.closest('.nv-item'); if (!item) return;
+    const linkVon = it => it && it.querySelector(':scope > .nv-row > a');
+    const links = [...nav.querySelectorAll('a.nv-link')].filter(a => a.offsetParent !== null);
+    const i = links.indexOf(linkVon(item));
+    const hat = !!item.querySelector(':scope > .nv-sub'), auf = item.classList.contains('auf');
+    let ziel = null;
+    switch (ev.key) {
+      case 'ArrowDown': ziel = links[Math.min(links.length - 1, i + 1)]; break;
+      case 'ArrowUp': ziel = links[Math.max(0, i - 1)]; break;
+      case 'Home': ziel = links[0]; break;
+      case 'End': ziel = links[links.length - 1]; break;
+      case 'ArrowRight':
+        if (!hat) return;
+        if (!auf) { navUmschalten(item.dataset.key, true); ziel = linkVon(item); }
+        else ziel = item.querySelector(':scope > .nv-sub a.nv-link');
+        break;
+      case 'ArrowLeft':
+        if (hat && auf) { navUmschalten(item.dataset.key, false); ziel = linkVon(item); }
+        else ziel = linkVon(item.parentElement && item.parentElement.closest('.nv-item'));
+        break;
+      default: return;
+    }
+    ev.preventDefault();
+    if (ziel) ziel.focus();
+  });
 }
 function updateChrome() {
   const m = S.report && S.report.Meta;
@@ -754,7 +942,7 @@ function catView(id, title, sub, pred, extra) {
     const nodes = [];
     groups.forEach(g => {
       if (!g.vis.length) return;
-      nodes.push(h('div', { class: 'section-title' }, h('h3', null, g.cat, infoTip('', g.cat)), miniChips(g.all), h('span', { class: 'bar' })));
+      nodes.push(h('div', { class: 'section-title', 'data-kat': g.cat }, h('h3', null, g.cat, infoTip('', g.cat)), miniChips(g.all), h('span', { class: 'bar' })));
       g.vis.forEach(f => nodes.push(findingRow(f)));
     });
     if (!nodes.length && fs.length) nodes.push(h('div', { class: 'card muted', text: 'Keine Prüfung passt zu Filter und Suche.' }));
@@ -771,7 +959,7 @@ function catView(id, title, sub, pred, extra) {
 function gamingGrid() {
   const rows = GAMING_CHECKS.map(c => findingByCheck(c)).filter(Boolean);
   if (!rows.length) return null;
-  return h('div', null, h('div', { class: 'section-title' }, h('h3', { text: 'Gaming-Check' }), h('span', { class: 'bar' })), h('div', { class: 'card' }, h('div', { class: 'gaming' }, rows.map(f =>
+  return h('div', { id: 'gaming-check' }, h('div', { class: 'section-title' }, h('h3', { text: 'Gaming-Check' }), h('span', { class: 'bar' })), h('div', { class: 'card' }, h('div', { class: 'gaming' }, rows.map(f =>
     h('div', { class: 'g-item', style: `--c:${STATUS_COLOR[f.Status]}` },
       h('span', { class: 'chip ' + f.Status, text: STATUS_NAME[f.Status] }),
       h('a', { href: '#/gaming', text: f.Check, onclick: e => { e.preventDefault(); reveal(f.Check); } }),
@@ -1347,7 +1535,7 @@ V.werkzeuge = () => {
     readOnly() ? safetyBanner() : null,
     // Reihenfolge (2.4): Wartung & Reparatur zuerst
     wartungCard(),
-    h('div', { class: 'card' }, h('h2', { text: 'Microsoft Defender' }), body),
+    h('div', { class: 'card', id: 'def-card' }, h('h2', { text: 'Microsoft Defender' }), body),
     updCard(),
     sysCard(),
     spOrdnerCard());
@@ -1814,9 +2002,8 @@ function wtResultDlg(c) {
   if (err) body.push(h('p', { class: 'rem', text: err.message }));
   else if (!res || res.error || !res.status) body.push(h('p', { class: 'rem', text: (res && res.error) || 'Der Vorgang ist fehlgeschlagen.' }));
   else body.push(...wtResultNodes(res, cfg));
-  // Prüfung G3/W11: Hat winget seinen Download-Ordner für andere Konten freigegeben?
-  const wo = res && res.wingetOrdner;
-  if (wo && wo.text) body.push(h('p', null, h('span', { class: 'chip ' + (wo.gehalten ? 'OK' : 'WARN'), text: wo.gehalten ? 'WinGet-Ordner geschützt' : 'WinGet-Ordner freigegeben' }), ' ', wo.text));
+  // 2.5 (#67, G3): winget lief ohne Adminrechte
+  if (res && res.benutzerkontext) body.push(h('p', null, h('span', { class: 'chip OK', text: 'ohne Adminrechte' }), ' winget lief im Benutzerkontext. Programme, die Adminrechte brauchen, haben selbst über Windows gefragt.'));
   const btns = [];
   if (res && res.bericht) btns.push({ label: 'Bericht öffnen', onClick: () => wtOpenReport(res.bericht) });
   if (cfg.winget) btns.push({ label: 'Erneut suchen', onClick: () => { dlgClose(); updSuchen(); } });
@@ -1898,7 +2085,7 @@ function wtRestore(d, dis, tt) {
     h('span', null, '24-Stunden-Sperre ', sf.sperre24h ? h('span', { class: 'chip WARN', text: 'aktiv' }) : h('span', { class: 'chip OK', text: 'nein' })),
     sf.speicherKlein ? h('span', null, 'Speicher ', h('span', { class: 'chip WARN', text: 'zu klein' }), sf.speicherMax ? ` (erlaubt: ${sf.speicherMax})` : '') : null,
     h('span', null, 'Letzter Punkt: ', h('b', { text: sf.letzterPunkt ? fmtDate(sf.letzterPunkt) : '–' })));
-  return h('div', { class: 'wt-group' }, h('h3', { text: 'Wiederherstellungspunkt' }),
+  return h('div', { class: 'wt-group', id: 'wt-punkt' }, h('h3', { text: 'Wiederherstellungspunkt' }),
     h('p', { class: 'wt-expl', text: 'Vor jeder nicht umkehrbaren Reparatur legt Morpheus selbst einen Wiederherstellungspunkt an. Hier kannst du einen von Hand anlegen.' }),
     state,
     sf.schutzAn === false ? h('div', null, h('p', { class: 'wt-meta', text: 'Der Computerschutz ist aus. Schalte ihn ein (Administrator-PowerShell), danach die Seite neu laden:' }), sf.befehlSchutz ? cmdBlock(sf.befehlSchutz) : null) : null,
@@ -1931,7 +2118,7 @@ function wtBody(d, upd) {
     if (g.name === 'Systemdateien') gk.push(h('p', { class: 'wt-expl', text: 'Reihenfolge 1 bis 4: Erst prüfen (1, 2), bei Befund den Komponentenspeicher reparieren (3), danach die Systemdateien (4). SFC repariert aus dem Komponentenspeicher, den DISM vorher in Ordnung bringt.' }));
     if (g.name === 'Komponentenspeicher') gk.push(h('p', { class: 'wt-expl', text: 'Den Ordner WinSxS nie von Hand löschen. Morpheus verwendet kein /ResetBase, damit Updates deinstallierbar bleiben.' }));
     gk.push(h('div', { class: 'wt-list' }, g.list.map(w => wtRow(w, d, dis, tt))));
-    if (g.name === 'Diagnose') gk.push(h('div', { class: 'wt-row' },
+    if (g.name === 'Diagnose') gk.push(h('div', { class: 'wt-row', 'data-id': 'perfmon.rel' },
       h('div', { class: 'wt-head' }, h('b', { class: 'wt-title', text: 'Zuverlässigkeitsverlauf' }), klasseChip('diagnose')),
       h('p', { class: 'wt-expl', text: 'Zeigt in Windows, wann Programme oder das System abgestürzt sind.' }),
       h('p', { class: 'wt-meta', text: 'Öffnet sich ohne Adminrechte; klappt das nicht: Win + R, perfmon /rel' }),
@@ -2461,15 +2648,24 @@ function renderView(keepScroll) {
   try { node = view(); } catch (e) { console.error(e); node = banner('err', 'warn', h('b', { text: 'Anzeigefehler: ' }), e.message); }
   dOrdBannerEinsetzen(node);
   if (!keepScroll) node.classList.add('view-in');
-  $('#view').replaceChildren(node);
+  // Beim Neuzeichnen laden Karten (z. B. Werkzeuge) ihren Inhalt nachträglich; bis dahin ist die Seite kürzer und
+  // scrollTo würde nach oben gekappt. Die alte Höhe bleibt deshalb kurz als Mindesthöhe stehen (2.5.0, Test C).
+  const vw = $('#view');
+  clearTimeout(S.ui.minHT);
+  vw.style.minHeight = keepScroll ? vw.offsetHeight + 'px' : '';
+  if (keepScroll) S.ui.minHT = setTimeout(() => { vw.style.minHeight = ''; }, 3000);
+  vw.replaceChildren(node);
   renderNav();
   if (keepScroll) window.scrollTo(0, y); else if (!S.ui.reveal) window.scrollTo(0, 0);
   if (S.ui.reveal) doReveal();
+  if (S.ui.navZiel && !keepScroll) navZielZeigen();
 }
 function refreshView() { renderView(true); }
 function route() {
   const m = location.hash.match(/^#\/(\w+)/);
   const v = m && V[m[1]] ? m[1] : 'uebersicht';
+  // Ein Unterpunkt bleibt nur markiert, wenn der Wechsel von ihm kam
+  if (S.ui.navSubNeu) S.ui.navSubNeu = false; else { S.ui.navSub = null; S.ui.navZiel = null; }
   S.view = v;
   closeTips();
   renderView(false);
@@ -2499,7 +2695,7 @@ async function init() {
     return;
   }
   startHeartbeat();
-  initTopbar(); initStatusbar();
+  initTopbar(); initStatusbar(); initNav();
   window.addEventListener('hashchange', route);
   route();
   loadExtra();

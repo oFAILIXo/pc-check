@@ -89,7 +89,7 @@ $script:BenutzerTemp = $env:TEMP
 $env:PATH = [Environment]::SystemDirectory + ';' + [Environment]::GetFolderPath('Windows') + ';' + [Environment]::SystemDirectory + '\Wbem;' + [Environment]::SystemDirectory + '\WindowsPowerShell\v1.0'
 foreach ($morpheusVar in @([Environment]::GetEnvironmentVariables().Keys)) { if ([string]$morpheusVar -match '^(COR_|CORECLR_|COMPlus_|DOTNET_)') { [Environment]::SetEnvironmentVariable([string]$morpheusVar, $null) } }
 
-$ScriptVersion = '2.4.0'
+$ScriptVersion = '2.5.0'
 # Anzeigename (Dateien und Repos heißen weiter pc-check)
 $ProductName = 'Morpheus'
 $ProductTagline = 'PC Check-up'
@@ -1570,7 +1570,15 @@ Invoke-Check 'Wiederherstellung' -NeedsAdmin {
         $(if ($geloescht) { "; von Windows gelöscht: $geloescht in $EventDays Tagen" } else { '' })
     if (-not $reOn) { Add-Finding WARN $value 'Wiederherstellungsumgebung einschalten: reagentc /enable.' }
     elseif (-not $schutzAn) { Add-Finding INFO $value 'Systemschutz für C: einschalten: hilfreich vor Treiber- und OC-Experimenten.' }
-    elseif ($klein) { Add-Finding WARN ($value + '; Speicher zu klein') 'Windows löscht ältere Wiederherstellungspunkte, sobald der Speicher voll ist. Speicher auf etwa 10 % vergrößern, damit Punkte vor Änderungen erhalten bleiben.' }
+    elseif ($klein) {
+        # Point-in-time restore (Windows 11) setzt die VSS-Grenze bei jedem Start auf seine eigene Einstellung (Standard 2 %)
+        $pitr = $null
+        try { $pitr = Get-ScheduledTask -TaskPath '\Microsoft\Windows\Setup\' -TaskName 'PITRTask' -ErrorAction Stop } catch { }
+        if ($pitr -and ([string]$pitr.State -ne 'Disabled')) {
+            Add-Finding WARN ($value + '; Speicher zu klein, verwaltet von Point-in-time restore') 'Windows löscht ältere Wiederherstellungspunkte, sobald der Speicher voll ist, und setzt die Grenze bei jedem Start auf die Einstellung von Point-in-time restore zurück. Einstellungen > System > Wiederherstellung > Point-in-time restore > Anzeigen oder bearbeiten: Regler auf etwa 10 %.'
+        }
+        else { Add-Finding WARN ($value + '; Speicher zu klein') 'Windows löscht ältere Wiederherstellungspunkte, sobald der Speicher voll ist. Speicher auf etwa 10 % vergrößern, damit Punkte vor Änderungen erhalten bleiben.' }
+    }
     elseif (-not $rp) { Add-Finding OK ($value + ' (Morpheus legt vor jeder Änderung einen an)') }
     else { Add-Finding OK $value }
 }
@@ -3886,17 +3894,23 @@ if (-not $NoUpdatePrompt -and $interactive -and $candidates.Count) {
         }
         # Von winget gekürzte oder ungültige Ids nicht übergeben (2.4)
         elseif ($script:WingetLib) { $selected = @($selected | Where-Object { Test-MorpheusWingetId -Id $_.Id }) }
-        # WinGet-Ordner in TEMP vorab nur für Administratoren und SYSTEM anlegen (2.4, W11/G3)
-        $wgOrdner = ($wg -and $script:WingetLib -and $selected -and (Get-Command -Name Initialize-MorpheusWingetOrdner -CommandType Function -ErrorAction SilentlyContinue))
-        if ($wgOrdner) {
-            $io = Initialize-MorpheusWingetOrdner
-            if (-not $io.ok) { Write-Host ('  WinGet-Ordner ließ sich nicht vorbereiten: ' + $io.meldung) -ForegroundColor Yellow }
+        # winget läuft ohne Adminrechte (2.5, #67, G3); ohne WingetBenutzer.ps1 wird nichts aktualisiert (kein Rückfall)
+        if ($selected -and -not (Get-Command -Name Invoke-MorpheusWingetBenutzer -CommandType Function -ErrorAction SilentlyContinue)) {
+            Write-Host '  gui\lib\WingetBenutzer.ps1 fehlt; winget wird nicht mit Adminrechten gestartet, es wird nichts aktualisiert.' -ForegroundColor Yellow
+            foreach ($u in $selected) { $results += [pscustomobject][ordered]@{ Programm = $u.Name; Von = $u.Installiert; Auf = $u.Verfuegbar; Ergebnis = 'nicht aktualisiert (WingetBenutzer.ps1 fehlt)' } }
+            $selected = @()
+        }
+        $wgGelaufen = [bool]$selected
+        if ($selected) {
+            Write-Host '  winget läuft ohne Adminrechte. Braucht ein Programm Adminrechte, fragt Windows selbst nach: dort den Herausgeber prüfen.' -ForegroundColor DarkGray
         }
         foreach ($u in $selected) {
             while ($true) {
                 Write-Host "`n=== Aktualisiere $($u.Name) ($($u.Installiert) -> $($u.Verfuegbar))" -ForegroundColor Cyan
-                & $wg @(((Get-MorpheusWingetUpgradeArgumente -Id $u.Id) -split ' '))
-                $code = $LASTEXITCODE
+                $wr = Invoke-MorpheusWingetBenutzer -WingetPfad $wg -Argumente (Get-MorpheusWingetUpgradeArgumente -Id $u.Id) -Zeile { param($z) Write-Host ('  ' + $z) }
+                if ($wr.zeitueberschritten) { $result = 'fehlgeschlagen (Zeitlimit überschritten)'; break }
+                if ($null -eq $wr.exitCode) { $result = 'fehlgeschlagen ({0})' -f $wr.fehler; break }
+                $code = $wr.exitCode
                 if ($code -eq 0) { $result = 'aktualisiert'; break }
                 # 0x8A150006: Installer abgebrochen, meist weil das Programm noch läuft
                 if ((Get-MorpheusWingetErgebnis -ExitCode $code).status -eq 'laeuft-noch') {
@@ -3910,21 +3924,17 @@ if (-not $NoUpdatePrompt -and $interactive -and $candidates.Count) {
             Write-Host "  -> $result" -ForegroundColor $(if ($result -eq 'aktualisiert') { 'Green' } else { 'Red' })
             $results += [pscustomobject][ordered]@{ Programm = $u.Name; Von = $u.Installiert; Auf = $u.Verfuegbar; Ergebnis = $result }
         }
-        if ($wgOrdner) {
-            $wgTest = Test-MorpheusWingetOrdner
-            $wgOrdnerText = [string]$wgTest.text
-            Write-Host ('  ' + $wgOrdnerText) -ForegroundColor $(if ($wgTest.gehalten) { 'Green' } else { 'Yellow' })
-        }
     }
     else { Write-Host '  Keine Updates ausgewählt.' }
     $updateResults = @($results)
-    $wgOrdnerZeile = $null
-    if ($wgOrdnerText) { $wgOrdnerZeile = $wgOrdnerText }
 
     # Ergebnis an den Bericht anhängen
     $lines = @('', "## Updates nach dem Lauf ($(Get-Date -Format 'yyyy-MM-dd HH:mm'))", '')
-    if ($results) { $lines += (ConvertTo-MdTable $results) } else { $lines += '_Keine Updates ausgewählt._' }
-    if ($wgOrdnerZeile) { $lines += ''; $lines += $wgOrdnerZeile }
+    if ($results) {
+        $lines += (ConvertTo-MdTable $results)
+        if ($wgGelaufen) { $lines += ''; $lines += 'winget lief ohne Adminrechte (Benutzerkontext).' }
+    }
+    else { $lines += '_Keine Updates ausgewählt._' }
     [IO.File]::AppendAllText($mdPath, (($lines -join "`r`n") + "`r`n"), (New-Object Text.UTF8Encoding $false))
     try { Write-HtmlReport -Path $htmlPath } catch { Write-Warning "HTML-Bericht konnte nicht aktualisiert werden: $($_.Exception.Message)" }
     Write-Host "`nUpdate-Ergebnis an den Bericht angehängt (im Browser mit F5 neu laden)." -ForegroundColor Green

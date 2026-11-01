@@ -3,6 +3,11 @@
 'use strict';
 (() => {
   try { sessionStorage.setItem('pcCheckToken', 'demo-token'); } catch { /* egal */ }
+  // Für Screenshots: mock.html?nav=sicherheit,werkzeuge klappt diese Menüpunkte auf (2.5, #65)
+  try {
+    const nav = new URLSearchParams(location.search).get('nav');
+    if (nav != null) { const o = {}; nav.split(',').filter(Boolean).forEach(k => { o[k] = true; }); localStorage.setItem('morpheusNavAuf', JSON.stringify(o)); }
+  } catch { /* egal */ }
   const iso = d => { const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
   const F = (Area, Category, Check, Status, Value, Recommendation = '', x = {}) => ({ Area, Category, Check, Status, Value, Recommendation, OriginalStatus: '', Note: '', Effort: '', Benefit: '', Risk: '', Steps: [], Command: '', ...x });
   const base = [
@@ -136,7 +141,7 @@
     if (i >= 3) F2.forEach(f => { if (SYS_CHECKS.includes(f.Check)) { f.Status = 'SKIP'; f.Value = 'Sysinternals nicht eingerichtet: in Morpheus unter Werkzeuge herunterladen'; f.Recommendation = ''; } });
     if (i > 0) F2.forEach(f => { if (f.Check === 'Offene Ports' && i > 2) f.Status = 'CRIT'; if (f.Check === 'Software-Updates' && i > 4) f.Status = 'OK'; if (f.Check === 'Spielebibliotheken' && i > 6) f.Status = 'INFO'; });
     const name = `pc-check_${iso(d).slice(0, 10)}_1321`;
-    return { name, json: { Meta: { Computer: 'DEMO-PC', Erstellt: iso(d), Version: '2.3.1', Admin: true, EventDays: 14, DauerSek: 120 + i, Profil: 'Gaming' }, Findings: F2,
+    return { name, json: { Meta: { Computer: 'DEMO-PC', Erstellt: iso(d), Version: '2.5.0', Admin: true, EventDays: 14, DauerSek: 120 + i, Profil: 'Gaming' }, Findings: F2,
       Changes: i < 11 ? { VerglichenMit: 'vorher.json', Erstellt: iso(new Date(2026, 9, 24 - i, 13, 21)), AdminVorher: true, Status: [{ 'Prüfung': 'Offene Ports', Vorher: 'Kritisch', Jetzt: 'Warnung', Befund: '3 Ports' }], Bestand: { 'Autostart-Einträge': { Neu: ['Demo-Tool <b>fett</b>'], Entfernt: ['Altes Tool'] } } } : null,
       Speicher: sp,
       Data: { System: [{ Computer: 'DEMO-PC', Edition: 'Windows 11 Pro', Version: '24H2' }],
@@ -162,7 +167,7 @@
   const cnt = js => { const c = { CRIT: 0, WARN: 0, TIPP: 0, ACK: 0, INFO: 0, OK: 0, SKIP: 0 }; js.Findings.forEach(f => { c[f.Status]++; }); return c; };
   // ?berichte=0: wie im Nur-Lesen-Modus mit reparierbarem Datenordner (Daten liegen nicht im Codeordner, also kein Bericht)
   const ohneBerichte = new URLSearchParams(location.search).get('berichte') === '0';
-  const reportList = () => ohneBerichte ? [] : reps.map(r => ({ name: r.name, created: r.json.Meta.Erstellt, version: '2.3.1', admin: true, profil: 'Gaming', counts: cnt(r.json) }));
+  const reportList = () => ohneBerichte ? [] : reps.map(r => ({ name: r.name, created: r.json.Meta.Erstellt, version: '2.5.0', admin: true, profil: 'Gaming', counts: cnt(r.json) }));
 
   const A = (id, kategorie, pruefung, titel, erkl, n, a, r, extra = {}) => ({ id, kategorie, pruefung, titel, erklaerung: erkl, nutzen: n, aufwand: a, risiko: r, neustart: false, varianten: null,
     befehle: { ausfuehren: extra.cmd || '', rueckgaengig: extra.undo || '', erklaerung: extra.expl || [] }, zustand: { aktiv: false, wert: 'aus', stand: iso(new Date()) }, ...extra.o });
@@ -184,7 +189,7 @@
     { id: '20261024-190211-01', zeit: '2026-10-24T19:02:11', art: 'ausfuehren', aktion: 'netz.eee', titel: 'Energiesparfunktionen Netzwerkkarte aus', variante: null, vorher: 'an', nachher: 'aus', wiederherstellungspunkt: { seq: 56, zeit: '2026-10-24T19:02:00' }, status: 'erledigt', bezug: null, meldung: '', benutzer: 'demo' },
     { id: '20261024-110000-01', zeit: '2026-10-24T11:00:00', art: 'ausfuehren', aktion: 'gaming.gamedvr', titel: 'Game DVR aus (Zustand wurde danach geändert)', variante: null, vorher: 1, nachher: 0, wiederherstellungspunkt: { seq: 55, zeit: '2026-10-24T10:59:50' }, status: 'erledigt', bezug: null, meldung: '', benutzer: 'demo' },
   ];
-  const session = { datenordner: null, version: '2.3.1', pc: 'DEMO-PC', admin: true, profil: 'Gaming', benutzer: 'demo',
+  const session = { datenordner: null, version: '2.5.0', pc: 'DEMO-PC', admin: true, profil: 'Gaming', benutzer: 'demo',
     safety: { schutzAn: true, laufwerk: 'C:', sperre24h: true, letzterPunkt: '2026-10-25T12:02:11', befehl: "New-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\SystemRestore' -Name SystemRestorePointCreationFrequency -PropertyType DWord -Value 0 -Force" } };
   // v2.4 (#63): Demo-Schalter ?datenordner=1 (reparierbar, Nur-Lesen) bzw. ?datenordner=repariert (normal, Reparatur heute)
   const dMode = new URLSearchParams(location.search).get('datenordner');
@@ -424,7 +429,7 @@
     wartungEintrag({ id: 'powercfg.energy', gruppe: 'Energieberichte', schritt: 1, klasse: 'diagnose', titel: 'Energiebericht erstellen', erklaerung: 'Misst 60 Sekunden lang den Energieverbrauch und sucht nach Problemen. Der Bericht landet in der Berichtsliste.', befehl: 'powercfg.exe /energy /output <Bericht> /duration 60', dauer: '1–4 Minuten', abbruch: 'sofort' }),
     wartungEintrag({ id: 'powercfg.akku', gruppe: 'Energieberichte', schritt: 2, klasse: 'diagnose', titel: 'Akkubericht erstellen', erklaerung: 'Zeigt Kapazität und Alterung des Akkus. Nur auf Notebooks.', befehl: 'powercfg.exe /batteryreport /output <Bericht>', dauer: 'etwa 2 Minuten', abbruch: 'nein' }),
     wartungEintrag({ id: 'powercfg.schlaf', gruppe: 'Energieberichte', schritt: 3, klasse: 'diagnose', titel: 'Schlafstudie erstellen', erklaerung: 'Zeigt, wie der PC geschlafen hat. Gibt es nur mit Modern Standby.', befehl: 'powercfg.exe /sleepstudy /output <Bericht>', dauer: 'etwa 2 Minuten', abbruch: 'nein' }),
-    wartungEintrag({ id: 'winget.upgrade', gruppe: 'Programme', schritt: 1, klasse: 'reparatur', titel: 'Programme aktualisieren (winget)', erklaerung: 'Aktualisiert ausgewählte Programme über winget. Startet über den Dialog „Programme aktualisieren“.', befehl: 'winget upgrade --id <Paket-Id> --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity', dauer: '1–10 Minuten je Programm', abbruch: 'nach-paket', parameter: 'ids', internet: true, hinweis: 'Programme vorher schließen.' }),
+    wartungEintrag({ id: 'winget.upgrade', gruppe: 'Programme', schritt: 1, klasse: 'reparatur', titel: 'Programme aktualisieren (winget)', erklaerung: 'Aktualisiert ausgewählte Programme über winget. Startet über den Dialog „Programme aktualisieren“. winget läuft ohne Adminrechte; braucht ein Programm Adminrechte, fragt Windows selbst nach.', befehl: 'winget upgrade --id <Paket-Id> --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity', dauer: '1–10 Minuten je Programm', abbruch: 'nach-paket', parameter: 'ids', internet: true, hinweis: 'Programme vorher schließen. Fragt Windows nach Adminrechten, den angezeigten Herausgeber prüfen.' }),
   ];
   const WART_LAUFWERKE = [{ laufwerk: 'C:', bezeichnung: 'System', ssd: true }, { laufwerk: 'F:', bezeichnung: 'Spiele', ssd: true }, { laufwerk: 'D:', bezeichnung: 'Daten', ssd: false }];
   const WART_PFAD = 'C:\\WINDOWS\\system32\\';
@@ -603,6 +608,7 @@
     const hms = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
     const punkt = ohne ? null : { seq: 58, zeit: iso(d) };
     const zeilen = ohne ? ['Ohne Wiederherstellungspunkt: bewusst bestätigt.'] : ['Lege Wiederherstellungspunkt an: Morpheus: vor Programm-Updates', `Wiederherstellungspunkt #58 geprüft (${hms}).`];
+    zeilen.push('winget läuft ohne Adminrechte. Braucht ein Programm Adminrechte, fragt Windows selbst nach: Herausgeber prüfen.');
     const plan = [];
     gewaehlt.forEach((u, i) => {
       const paket = { id: u.id, name: u.name, von: u.installiert, auf: u.verfuegbar };
@@ -623,7 +629,7 @@
       return { werkzeug: 'winget.upgrade', titel: 'Programme aktualisieren (winget)', klasse: 'reparatur', status: 'erledigt', befehl: null, laufwerk: null, exitCode: null, dauerSek,
         zusammenfassung: { ergebnis: alleOk ? 'ok' : 'problem', text: alleOk ? 'Alle Programme aktualisiert.' : 'Ein Programm läuft noch.', empfehlung: alleOk ? null : 'Programme schließen und erneut versuchen.', details: [] },
         punkt, ohnePunkt: ohne, meldung: alleOk ? 'Alle Programme aktualisiert.' : 'Ein Programm läuft noch.', bericht: null, journal: null, pakete,
-        wingetOrdner: { gehalten: true, konten: [], text: 'WinGet-Ordner: Rechte gehalten (nur Administratoren und SYSTEM).' } };
+        benutzerkontext: true };
     });
     Object.assign(jobs[jid], { werkzeug: 'winget.upgrade', abbruch: 'nach-paket', punkt, ohne, paketPlan: plan });
     return [200, { jobId: jid }];
@@ -665,7 +671,8 @@
     const method = (opt.method || 'GET').toUpperCase();
     const body = opt.body ? JSON.parse(opt.body) : {};
     const path = u.split('?')[0], q = new URLSearchParams(u.split('?')[1] || '');
-    await new Promise(r => setTimeout(r, 80));
+    // mock.html?latenz=1500 simuliert einen langsamen Server (z. B. /api/wartung mit Laufwerksabfrage)
+    await new Promise(r => setTimeout(r, Number(new URLSearchParams(location.search).get('latenz')) || 80));
     let res = [404, { error: 'Unbekannter Pfad (Mock): ' + path }], m;
     if (path === '/api/session') res = [200, session];
     else if (path === '/api/live') res = [200, live()];
