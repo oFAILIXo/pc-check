@@ -45,6 +45,28 @@ nav a{display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:va
 nav a:hover{background:#ffffff08;color:var(--b2)}
 nav a.on{background:linear-gradient(90deg,#ffffff12,#ffffff03);color:var(--b3);box-shadow:inset 2px 0 0 var(--accent),inset 10px 0 12px -10px var(--accent-soft)}
 nav a.on svg{color:var(--b2)}
+/* Aufklappbares Menü (2.5, #65): Den Akzent-Balken trägt nur der aktive Hauptpunkt; Unterpunkte werden neutral hervorgehoben */
+.nv-row{display:flex;align-items:center;gap:2px}
+.nv-row>a{flex:1;min-width:0}
+nav a .nv-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* all:unset wie bei button.srow: h() gibt jedem Button die Klasse btn */
+button.nv-tog{all:unset;box-sizing:border-box;flex:none;width:26px;height:30px;display:grid;place-items:center;border-radius:var(--r-sm);color:var(--b01);cursor:pointer}
+button.nv-tog:hover{background:var(--hover);color:var(--b2)}
+button.nv-tog:focus-visible,nav a:focus-visible{outline:2px solid var(--cyan);outline-offset:-2px}
+.nv-tog svg.i{width:14px;height:14px;transition:transform .15s}
+.nv-item.auf>.nv-row>.nv-tog svg.i{transform:rotate(90deg)}
+.nv-sub{margin:1px 0 4px 19px;padding-left:6px;border-left:1px solid var(--line2)}
+.nv-sub[hidden]{display:none}
+.nv-sub a{padding:5px 9px;font-size:12.5px;color:var(--b01);gap:8px}
+.nv-sub a:hover{color:var(--b2)}
+nav .nv-sub a.on{background:#ffffff0d;color:var(--b3);box-shadow:none}
+.nv-sub .nv-sub{margin-left:8px}
+.nv-sub a.leer{font-style:italic;color:var(--b01)}
+.nv-flash{animation:flash 1.8s;border-radius:var(--r-sm)}
+#gaming-check,#view .card[id],#wt-punkt,#view .wt-row[data-id]{scroll-margin-top:84px}
+/* Kategorien liegen unter Kopfleiste (57 px) und fixierter Filterleiste (bis 88 px, wenn sie umbricht) */
+#view .section-title[data-kat]{scroll-margin-top:160px}
+#view .wt-row[tabindex]:focus,#view .card[tabindex]:focus,#view .section-title[tabindex]:focus,#wt-punkt:focus,#gaming-check:focus{outline:none}
 nav a .cnt{margin-left:auto;font-size:11px;font-weight:600;padding:1px 7px;border-radius:10px;white-space:nowrap}
 .cnt.c{background:#dc322f2e;color:var(--t-red)}.cnt.w{background:#cb4b1626;color:var(--t-orange)}.cnt.t{background:#d3368226;color:var(--t-magenta)}.cnt.n{background:#ffffff0d;color:var(--b0)}.cnt.i{background:#268bd226;color:var(--t-blue)}
 .side-foot{margin-top:auto;padding:14px 18px;border-top:1px solid var(--line);font-size:12px;color:var(--b01);display:flex;gap:10px;align-items:center}
@@ -384,6 +406,10 @@ button.srow[disabled]:hover{background:none;color:var(--b1)}
   .navh,.side-foot{display:none}
   nav a{padding:7px 9px;gap:6px;font-size:13px}
   nav a.on{box-shadow:inset 0 -2px 0 var(--accent)}
+  .nv-item,.nv-row{display:contents}
+  .nv-tog,.nv-sub{display:none!important}
+  nav a .nv-label{overflow:visible}
+  .nv-row>a{flex:none}
   .top{position:static;flex-wrap:wrap;padding:10px 16px;gap:8px}
   .crumb{flex:1 1 100%}
   .search{order:5;flex:1 1 100%;margin-left:0;width:auto}

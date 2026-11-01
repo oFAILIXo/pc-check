@@ -64,7 +64,7 @@ Voraussetzungen: Windows 11 (Windows 10 funktioniert weitgehend), Windows PowerS
 - **17 Anpassungen per Klick:** jede mit Bestätigungsdialog, Befehl zum Nachlesen und Erklärung.
 - **Checkliste:** Punkte als „erledigt“ oder „später“ markieren. Der nächste Lauf zeigt, was wirklich behoben ist.
 - **Wartung & Reparatur (ab 2.4):** DISM, SFC, Komponentenspeicher, chkdsk, DNS leeren, ReTrim, Zeit abgleichen, Energieberichte und Zuverlässigkeitsverlauf, mit festen Befehlen, Windows-Bestätigung und verständlicher Zusammenfassung.
-- **Programme aktualisieren (ab 2.4):** winget-Updates in der Oberfläche mit Auswahl, Fortschritt und Ergebnis; im Konsolen-Scan weiter der Update-Dialog am Ende.
+- **Programme aktualisieren (ab 2.4):** winget-Updates in der Oberfläche mit Auswahl, Fortschritt und Ergebnis; im Konsolen-Scan weiter der Update-Dialog am Ende. Ab 2.5 läuft winget ohne Adminrechte; Installer mit Adminbedarf fragen selbst über Windows nach.
 
 **Absichern**
 - **Wiederherstellungspunkt vor jeder Änderung**, Rückgängig für jede Änderung einzeln.
@@ -95,6 +95,10 @@ Voraussetzungen: Windows 11 (Windows 10 funktioniert weitgehend), Windows PowerS
 | Neuer Scan | Optionen, Start, Live-Protokoll; danach öffnet sich der neue Bericht |
 | Rohdaten | Detailtabellen hinter den Prüfungen |
 | Einstellungen | Profil, Zeitraum und Akzeptanzliste (Regeln ansehen und zurücknehmen) |
+
+**Menü (ab 2.5):** Jeder Bereich mit einem Pfeil `›` klappt seine Unterpunkte auf: Sicherheit, Leistung, Gaming und Stabilität ihre Kategorien, „Alle Prüfungen“ die Status-Filter, „Werkzeuge“ die Karten und unter „Wartung & Reparatur“ jedes einzelne Werkzeug. Ein Klick springt direkt dorthin. Ein Klick auf den Bereich selbst öffnet ihn und klappt ihn auf. Mit der Tastatur: Pfeil hoch/runter wechselt den Eintrag, Pfeil rechts klappt auf bzw. geht zum ersten Unterpunkt, Pfeil links klappt zu bzw. geht zurück zum Bereich, Enter öffnet.
+
+![Menü mit aufgeklappten Werkzeugen (Demodaten)](docs/screenshots/07-werkzeuge-menue.png)
 | Werkzeuge | Wartung & Reparatur (Wiederherstellungspunkt anlegen, DISM, SFC, Komponentenspeicher, chkdsk, DNS, ReTrim, Zeit, Energieberichte, Zuverlässigkeitsverlauf); Defender-Signaturen aktualisieren, Schnellscan, Offline-Scan (mit Countdown, der PC startet neu); Programme aktualisieren (winget); eigene Spiele-Ordner; Sysinternals-Werkzeuge einrichten |
 
 Die Suche liegt oben. Mit der Taste `/` springst du direkt dorthin.
@@ -300,7 +304,8 @@ Unter **Werkzeuge > Programme aktualisieren** sucht Morpheus mit winget nach Upd
 - Vorher entsteht ein Wiederherstellungspunkt. **Programm-Updates lassen sich nicht über „Änderungen“ zurücknehmen**; im Journal steht je Programm ein Protokoll.
 - Angeboten werden nur Programme aus der zuletzt in Morpheus gesuchten Liste (gleiche Regeln wie im Konsolendialog unten).
 - „Abbrechen“ hört nach dem gerade laufenden Programm auf.
-- **Bekanntes Restrisiko:** winget legt heruntergeladene Installer in einem Unterordner `WinGet` des Temp-Ordners ab und gibt diesen Ordner deinem Konto frei. Ein Programm, das schon unter deinem Konto läuft, könnte einen Installer kurz vor dem Start austauschen; er liefe dann mit Adminrechten. Das betrifft alle Versionen von Morpheus (Update-Dialog in der GUI und am Ende des Konsolen-Scans) und genauso jedes `winget upgrade` in einem Admin-Terminal. Morpheus legt den Ordner vor jedem Lauf nur für Administratoren an, winget gibt ihn aber trotzdem frei (getestet am 27.10.2026). Morpheus zeigt das nach jedem Lauf an („WinGet hat den Ordner für … freigegeben“). Die Behebung folgt in 2.5: winget läuft dann ohne Adminrechte, Installer, die Adminrechte brauchen, fragen selbst per Windows-Dialog nach.
+- **winget läuft ohne Adminrechte (ab 2.5),** bei der Suche und bei den Updates. Morpheus startet winget über eine kurzlebige geplante Aufgabe unter deinem Konto, aber mit dem normalen Benutzer-Token (wie ein Programm aus dem Startmenü). Die Aufgabe wird nach jedem Programm wieder gelöscht. Braucht ein Installer Adminrechte, fragt Windows selbst nach (Benutzerkontensteuerung). **Dort den Herausgeber prüfen**: Steht „Unbekannt“ oder ein unerwarteter Name da, „Nein“ wählen. Je Programm kann also eine Windows-Abfrage erscheinen. Lehnst du sie ab, meldet Morpheus das Programm als „nicht aktualisiert“.
+- **Behoben in 2.5:** Bis 2.4.0 lief winget mit Adminrechten. winget legt heruntergeladene Installer in einem Ordner ab, den es deinem Konto freigibt; ein Programm, das schon unter deinem Konto läuft, hätte einen Installer kurz vor dem Start austauschen können, der dann mit Adminrechten gelaufen wäre (bekanntes Restrisiko von 2.4.0). Jetzt bekommt ein ausgetauschter Installer keine Adminrechte mehr ohne sichtbare Windows-Abfrage.
 - Morpheus startet winget nur aus dem signierten App-Installer-Paket unter `C:\Program Files\WindowsApps`, nie über den Suchpfad (der App-Alias im Benutzerprofil wäre von Programmen ohne Adminrechte austauschbar). Das gilt ab 2.4 auch für den Scan.
 
 ## Sysinternals-Werkzeuge (ab 2.3)
@@ -324,6 +329,7 @@ Gilt für den reinen Scan in der Konsole (`pc-check.cmd`); in der GUI geht das u
 
 - winget lädt die Updates aus den Herstellerquellen und **akzeptiert dabei die Lizenzbedingungen der Pakete**.
 - Nicht angeboten werden Spiele und Launcher, Programme mit eigener Update-Funktion (Edge, Teams, Outlook, VS Code, Autodesk Fusion) und Einträge, die winget kennt, Windows aber nicht mehr als installiert führt.
+- winget läuft auch hier ohne Adminrechte (ab 2.5, siehe oben); die Ausgabe erscheint in der Konsole, Installer mit Adminbedarf fragen selbst über Windows nach.
 - Bricht ein Installer ab, weil das Programm noch läuft, bietet der Dialog nach dem Schließen einen zweiten Versuch an.
 - Das Ergebnis wird als Abschnitt „Updates nach dem Lauf“ an den Bericht angehängt.
 
@@ -354,13 +360,15 @@ Store-Apps (MSIX) virtualisieren Teile der Registry (`HKCU`) für alle Prozesse,
 
 ## Entwicklung
 
-- **Mock-Modus** ohne Adminrechte und ohne echten Scan: Im Ordner `gui` einen Server starten, z. B. `python -m http.server 8791 --bind 127.0.0.1`, und `http://127.0.0.1:8791/dev/mock.html` öffnen. Die Routen sind Hash-Adressen, z. B. `#/uebersicht`, `#/sicherheit`, `#/aenderungen`, `#/gaming`, `#/berichte`, `#/rohdaten`. Die Screenshots in `docs\screenshots\` entstehen so mit Demodaten.
+- **Mock-Modus** ohne Adminrechte und ohne echten Scan: Im Ordner `gui` einen Server starten, z. B. `python -m http.server 8791 --bind 127.0.0.1`, und `http://127.0.0.1:8791/dev/mock.html` öffnen. Die Routen sind Hash-Adressen, z. B. `#/uebersicht`, `#/sicherheit`, `#/aenderungen`, `#/gaming`, `#/berichte`, `#/rohdaten`. Mit `?nav=sicherheit,werkzeuge` vor dem `#` klappt der Mock diese Menüpunkte auf, `?latenz=1500` simuliert einen langsamen Server. Die Screenshots in `docs\screenshots\` entstehen so mit Demodaten.
 - **Tests** mit Pester 3.4, das in Windows enthalten ist. Aufruf im Projektordner: `Invoke-Pester .\tests`. Die Tests ändern nichts am System. Wiederherstellungspunkte und Aktionen werden nur gelesen bzw. mit Attrappen geprüft.
 - **Aktionskatalog:** Neue Aktionen in `pc-check.aktionen.ps1` brauchen Lesen, Ausführen, Rückgängig und einen Eintrag in `tests/Aktionen.Tests.ps1`.
 - Aufbau und Sicherheitsmodell der GUI: `docs/gui-architektur.md`.
 
 ## Versionen
 
+- **2.5.0:** Aufklappbares Menü links: Bereiche zeigen ihre Kategorien, „Alle Prüfungen“ die Filter, „Werkzeuge“ die Karten und jedes Wartungswerkzeug; ein Klick springt direkt dorthin, bedienbar per Tastatur. **Sicherheit:** winget läuft nur noch ohne Adminrechte, bei der Suche und bei den Updates, im Update-Dialog der GUI und am Ende des Konsolen-Scans. Installer, die Adminrechte brauchen, fragen selbst über Windows nach, mit sichtbarem Herausgeber. Damit ist das in 2.4.0 genannte Restrisiko (ausgetauschter Installer im Temp-Ordner von winget) behoben. Die Zeile „WinGet-Ordner“ aus 2.4 entfällt.
+  - **Behoben:** Der Speicher für Wiederherstellungspunkte fiel auf 2 % zurück (auch in 2.4.0). Unter Windows 11 mit „Point-in-time restore“ setzt Windows die Grenze bei jedem Start auf dessen Einstellung zurück; die Anpassung „Speicher auf 10 % vergrößern“ wirkte nur bis zum Neustart. Morpheus erkennt das jetzt und nennt den dauerhaften Weg: Einstellungen › System › Wiederherstellung › Point-in-time restore › Regler auf etwa 10 %.
 - **2.4.0:** Werkzeuge > Wartung & Reparatur: neue Klasse „nicht umkehrbare Aktion“ mit festem Befehlskatalog, Windows-Bestätigung, Hintergrund-Job mit Live-Ausgabe und Abbruch, geprüftem Wiederherstellungspunkt vor Reparaturen und Protokoll im Journal; Knopf „Wiederherstellungspunkt jetzt anlegen“; DISM (CheckHealth, ScanHealth, RestoreHealth, AnalyzeComponentStore, StartComponentCleanup) und `sfc /scannow` mit verständlicher Zusammenfassung; `chkdsk /scan`, DNS leeren, ReTrim, Zeit abgleichen, Energieberichte, Zuverlässigkeitsverlauf. Werkzeuge > Programme aktualisieren (winget) mit Auswahl, Fortschritt und Ergebnis. winget nur noch aus dem signierten App-Installer-Paket (auch im Scan). Datenordner-Rechte in der GUI reparieren statt beiseitelegen (#63).
   - **Behoben:** Die Verbindung zur GUI brach ab, wenn das Morpheus-Fenster 1–2 Minuten im Hintergrund lag (Edge drosselt dann die Seite, der Server wertete das als geschlossenes Fenster). Betroffen waren alle Versionen seit 2.1. Jetzt gilt das Ende der Edge-Prozesse mit dem Morpheus-Profil als Signal; das Lebenszeichen der Seite ist nur noch Rückfall (10 Minuten), und Edge startet ohne Drosselung des Hintergrundfensters.
 - **2.3.3:** Sicherheits-Hotfix gegen Rechteausweitung. Morpheus fand winget und PowerShell-Module bisher auch in Ordnern, die Programme ohne Adminrechte beschreiben können, und hätte dort abgelegte Fälschungen mit Adminrechten gestartet. Jetzt gilt: winget nur aus dem signierten App-Installationsprogramm (sonst wird die Prüfung übersprungen), Module nur aus System32 und Program Files, alle Windows-Programme mit vollem Pfad, temporäre Dateien im gesicherten Datenordner, kein Standardbrowser mit Adminrechten. Ein neuer Test hält das für künftige Erweiterungen fest.
@@ -404,7 +412,7 @@ Morpheus ist ein privates Hilfsmittel ohne Gewähr. Die Empfehlungen im Bericht 
 
 ## English
 
-**Morpheus – PC Check-up** is a security and performance check for Windows 11 PCs with a GUI. The scan reads only. It runs about 110 checks (Defender, firewall, core isolation, Secure Boot, TPM, vulnerable drivers, autostart, RAM/XMP, refresh rate, power plan, gaming settings, crashes …). The GUI applies recommendations per click. Every change is protected by a restore point and can be reverted individually. Since 2.4 the *Werkzeuge* (tools) view also runs Windows maintenance tools (DISM, SFC, chkdsk, ReTrim, power reports) and winget program updates, each after a Windows confirmation. Known residual risk: winget shares its installer download folder with your user account, so a program already running under your account could swap an installer before it starts with admin rights (the same applies to any `winget upgrade` in an admin terminal); version 2.5 will run winget without admin rights. The texts are currently German only; an English interface is planned for 2.5.
+**Morpheus – PC Check-up** is a security and performance check for Windows 11 PCs with a GUI. The scan reads only. It runs about 110 checks (Defender, firewall, core isolation, Secure Boot, TPM, vulnerable drivers, autostart, RAM/XMP, refresh rate, power plan, gaming settings, crashes …). The GUI applies recommendations per click. Every change is protected by a restore point and can be reverted individually. Since 2.4 the *Werkzeuge* (tools) view also runs Windows maintenance tools (DISM, SFC, chkdsk, ReTrim, power reports) and winget program updates, each after a Windows confirmation. Since 2.5 the left menu expands into categories and individual tools, and winget runs without admin rights: installers that need them ask via the Windows UAC prompt (check the publisher there). This fixes the residual risk of 2.4.0 (a swapped installer in the winget download folder). The texts are currently German only; an English interface is planned for 2.6.
 
 **Quick start (3 steps):**
 

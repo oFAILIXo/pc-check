@@ -349,138 +349,19 @@ Describe 'Get-MorpheusWingetErgebnis' {
         }
     }
 }
+Describe 'Winget.ps1 ohne Option (c) (2.5)' {
+    It 'Initialize-/Test-MorpheusWingetOrdner gibt es nicht mehr; WingetBenutzer.ps1 ist geladen' {
+        Get-Command -Name Initialize-MorpheusWingetOrdner -CommandType Function -ErrorAction SilentlyContinue | Should BeNullOrEmpty
+        Get-Command -Name Test-MorpheusWingetOrdner -CommandType Function -ErrorAction SilentlyContinue | Should BeNullOrEmpty
+        Get-Command -Name Invoke-MorpheusWingetBenutzer -CommandType Function -ErrorAction SilentlyContinue | Should Not BeNullOrEmpty
+    }
+}
 
-# ---------------------------------------------------------------- WinGet-Ordner in TEMP (W11/G3)
-# Echte Ordner unter $TestDrive. Ohne Adminrechte bleibt der Testbenutzer Besitzer; er gilt über
-# $script:MorpheusWingetOrdnerImpl.ZusatzVertraut als vertrauenswürdig (und bekommt Vollzugriff), IstAdmin ist eine Attrappe.
-Describe 'Initialize-MorpheusWingetOrdner / Test-MorpheusWingetOrdner' {
-    BeforeEach {
-        $script:WoSave = @{ IstAdmin = $script:MorpheusWingetOrdnerImpl.IstAdmin; ZusatzVertraut = $script:MorpheusWingetOrdnerImpl.ZusatzVertraut }
-        $script:MorpheusWingetOrdnerImpl.IstAdmin = { $false }
-        $script:MorpheusWingetOrdnerImpl.ZusatzVertraut = @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
-        $script:wt = Join-Path $TestDrive ('t' + [guid]::NewGuid().ToString('N'))
-        [void][IO.Directory]::CreateDirectory($script:wt)
-    }
-    AfterEach {
-        $script:MorpheusWingetOrdnerImpl.IstAdmin = $script:WoSave.IstAdmin
-        $script:MorpheusWingetOrdnerImpl.ZusatzVertraut = $script:WoSave.ZusatzVertraut
-    }
-    function Add-UsersAce {
-        param([string]$Pfad)
-        $sid = New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545'
-        $item = Get-Item -LiteralPath $Pfad -Force
-        $acl = $item.GetAccessControl()
-        $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid, [Security.AccessControl.FileSystemRights]::ReadAndExecute, [Security.AccessControl.AccessControlType]::Allow)))
-        $item.SetAccessControl($acl)
-    }
-
-    It 'Test: nicht vorhanden -> gehalten, genauer Text' {
-        $t = Test-MorpheusWingetOrdner -TempPfad $script:wt
-        $t.vorhanden | Should Be $false
-        $t.gehalten | Should Be $true
-        @($t.konten).Count | Should Be 0
-        $t.pfad | Should Be (Join-Path $script:wt 'WinGet')
-        $t.text | Should Be 'WinGet-Ordner: nicht vorhanden (winget hat ihn nicht benutzt).'
-    }
-    It 'Initialize: legt den Ordner an, nur Administratoren, SYSTEM (und Testbenutzer), keine Vererbung' {
-        $r = Initialize-MorpheusWingetOrdner -TempPfad $script:wt
-        $r.ok | Should Be $true
-        $r.pfad | Should Be (Join-Path $script:wt 'WinGet')
-        [IO.Directory]::Exists($r.pfad) | Should Be $true
-        $acl = (New-Object IO.DirectoryInfo $r.pfad).GetAccessControl()
-        $acl.AreAccessRulesProtected | Should Be $true
-        $sids = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value })
-        ($sids -contains 'S-1-5-32-544') | Should Be $true
-        ($sids -contains 'S-1-5-18') | Should Be $true
-        ($sids -contains 'S-1-5-32-545') | Should Be $false
-        $t = Test-MorpheusWingetOrdner -TempPfad $script:wt
-        $t.vorhanden | Should Be $true
-        $t.gehalten | Should Be $true
-        $t.text | Should Be 'WinGet-Ordner: Rechte gehalten (nur Administratoren und SYSTEM).'
-    }
-    It 'Initialize: vorhandenen Inhalt (auch Unterordner, schreibgeschützte Datei) entfernt und neu anlegt' {
-        $w = Join-Path $script:wt 'WinGet'
-        [void][IO.Directory]::CreateDirectory((Join-Path $w 'Paket\tief'))
-        $d = Join-Path $w 'Paket\tief\setup.exe'
-        [IO.File]::WriteAllText($d, 'x')
-        [IO.File]::SetAttributes($d, [IO.FileAttributes]::ReadOnly)
-        $r = Initialize-MorpheusWingetOrdner -TempPfad $script:wt
-        $r.ok | Should Be $true
-        @([IO.Directory]::GetFileSystemEntries($w)).Count | Should Be 0
-    }
-    It 'Test: Zusatz-ACE für Benutzer auf Unterordner -> nicht gehalten, Konto genannt' {
-        [void](Initialize-MorpheusWingetOrdner -TempPfad $script:wt)
-        $sub = Join-Path $script:wt 'WinGet\Paket'
-        [void][IO.Directory]::CreateDirectory($sub)
-        Add-UsersAce -Pfad $sub
-        $t = Test-MorpheusWingetOrdner -TempPfad $script:wt
-        $t.gehalten | Should Be $false
-        @($t.konten).Count | Should Be 1
-        $name = (New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545').Translate([Security.Principal.NTAccount]).Value
-        $t.konten[0] | Should Be $name
-        $t.text | Should Be ('WinGet hat den Ordner für ' + $name + ' freigegeben.')
-    }
-    It 'Test: Zusatz-ACE für Benutzer auf einer Datei -> nicht gehalten' {
-        [void](Initialize-MorpheusWingetOrdner -TempPfad $script:wt)
-        $f = Join-Path $script:wt 'WinGet\setup.exe'
-        [IO.File]::WriteAllText($f, 'x')
-        Add-UsersAce -Pfad $f
-        (Test-MorpheusWingetOrdner -TempPfad $script:wt).gehalten | Should Be $false
-    }
-    It 'Initialize: stellt einen Ordner mit fremden Rechten wieder her' {
-        [void](Initialize-MorpheusWingetOrdner -TempPfad $script:wt)
-        $sub = Join-Path $script:wt 'WinGet\Paket'
-        [void][IO.Directory]::CreateDirectory($sub)
-        Add-UsersAce -Pfad $sub
-        $r = Initialize-MorpheusWingetOrdner -TempPfad $script:wt
-        $r.ok | Should Be $true
-        (Test-MorpheusWingetOrdner -TempPfad $script:wt).gehalten | Should Be $true
-    }
-    It 'Test: Verknüpfung im Ordner zählt als nicht gehalten (Konto Verknüpfung), wird nicht betreten' {
-        [void](Initialize-MorpheusWingetOrdner -TempPfad $script:wt)
-        $ziel = Join-Path $script:wt 'ziel'
-        [void][IO.Directory]::CreateDirectory($ziel)
-        $link = Join-Path $script:wt 'WinGet\link'
-        $cmd = Join-Path ([Environment]::SystemDirectory) 'cmd.exe'
-        & $cmd /c mklink /J "$link" "$ziel" | Out-Null
-        $t = Test-MorpheusWingetOrdner -TempPfad $script:wt
-        $t.gehalten | Should Be $false
-        ($t.konten -contains 'Verknüpfung') | Should Be $true
-    }
-    It 'Initialize: ist WinGet eine Junction, wird nur der Link entfernt, das Ziel bleibt' {
-        $ziel = Join-Path $script:wt 'ziel'
-        [void][IO.Directory]::CreateDirectory($ziel)
-        [IO.File]::WriteAllText((Join-Path $ziel 'wichtig.txt'), 'x')
-        $link = Join-Path $script:wt 'WinGet'
-        $cmd = Join-Path ([Environment]::SystemDirectory) 'cmd.exe'
-        & $cmd /c mklink /J "$link" "$ziel" | Out-Null
-        $r = Initialize-MorpheusWingetOrdner -TempPfad $script:wt
-        $r.ok | Should Be $true
-        [IO.File]::Exists((Join-Path $ziel 'wichtig.txt')) | Should Be $true
-        (([IO.File]::GetAttributes($link) -band [IO.FileAttributes]::ReparsePoint) -ne 0) | Should Be $false
-        (Test-MorpheusWingetOrdner -TempPfad $script:wt).gehalten | Should Be $true
-    }
-    It 'Initialize: Junction im Inhalt wird nicht betreten, das Ziel bleibt' {
-        $ziel = Join-Path $script:wt 'ziel'
-        [void][IO.Directory]::CreateDirectory($ziel)
-        [IO.File]::WriteAllText((Join-Path $ziel 'wichtig.txt'), 'x')
-        $w = Join-Path $script:wt 'WinGet'
-        [void][IO.Directory]::CreateDirectory($w)
-        $cmd = Join-Path ([Environment]::SystemDirectory) 'cmd.exe'
-        & $cmd /c mklink /J "$(Join-Path $w 'link')" "$ziel" | Out-Null
-        $r = Initialize-MorpheusWingetOrdner -TempPfad $script:wt
-        $r.ok | Should Be $true
-        [IO.File]::Exists((Join-Path $ziel 'wichtig.txt')) | Should Be $true
-    }
-    It 'Initialize: Fehler wird als ok false gemeldet, kein throw' {
-        # Datei als Elternordner: CreateDirectory scheitert
-        $blocker = Join-Path $script:wt 'datei'
-        [IO.File]::WriteAllText($blocker, 'x')
-        $r = Initialize-MorpheusWingetOrdner -TempPfad $blocker
-        $r.ok | Should Be $false
-        $r.meldung | Should Not BeNullOrEmpty
-    }
-    It 'Ohne -TempPfad zeigt der Pfad auf <GetTempPath>\WinGet' {
-        (Test-MorpheusWingetOrdner).pfad | Should Be (Join-Path ([IO.Path]::GetTempPath()) 'WinGet')
+Describe 'Update-Suche ohne Adminrechte (2.5.0, Test C)' {
+    $text = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\gui\lib\Winget.ps1'))
+    It 'Ausfuehren startet winget nur über Invoke-MorpheusWingetBenutzer, nie direkt' {
+        $text | Should Match 'Invoke-MorpheusWingetBenutzer -WingetPfad \$Pfad'
+        $text | Should Not Match 'Diagnostics\.Process\]::Start'
+        $text | Should Not Match 'Start-Process'
     }
 }

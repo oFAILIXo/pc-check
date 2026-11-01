@@ -9,6 +9,7 @@
     - Fester Katalog: Der Browser schickt nur eine Werkzeug-Id, ein Laufwerk aus der Serverliste und winget-Paket-Ids.
     - Programme nur mit vollem Pfad aus System32 (Get-MorpheusSystemProgramm, Systempfade.ps1, Abschnitt 17), winget über
       Get-MorpheusWingetPfad; nie über PATH oder Umgebungsvariablen. Lässt sich ein Pfad nicht auflösen, startet nichts.
+    - winget-Updates laufen ohne Adminrechte (2.5, #67) über Invoke-MorpheusWingetBenutzer (WingetBenutzer.ps1).
     - Vor jeder Reparatur ein geprüfter Wiederherstellungspunkt (Safety.ps1); fehlt er, startet nichts ('punkt-fehlt').
     - Jeder Lauf steht vor dem Start im Journal ('begonnen'), danach mit Ergebnis. Kein Rückgängig.
     - Alle Seiteneffekte (Prozess, Punkt, Laufwerke, Start ohne Adminrechte, winget-Pfad, Uhr) laufen über
@@ -63,7 +64,7 @@ $script:MorpheusWartungKatalog['zeit.resync'] = MorpheusWartungEintrag 'Wartung'
 $script:MorpheusWartungKatalog['powercfg.energy'] = MorpheusWartungEintrag 'Energieberichte' 1 'diagnose' 'Energiebericht erstellen' 'Misst 60 Sekunden lang, was den Energieverbrauch erhöht, und erstellt einen Bericht.' 'powercfg.exe' '/energy /output {BERICHT} /duration 60' 'powercfg.exe /energy /output <Bericht> /duration 60' 'sofort' $null 240 'etwa 1 Minute' $false 'Während der Messung den PC nicht benutzen und Programme schließen.' 'oem' 'energy'
 $script:MorpheusWartungKatalog['powercfg.akku'] = MorpheusWartungEintrag 'Energieberichte' 2 'diagnose' 'Akkubericht erstellen' 'Erstellt einen Bericht über Kapazität und Verschleiß des Akkus. Nur bei Notebooks sinnvoll.' 'powercfg.exe' '/batteryreport /output {BERICHT}' 'powercfg.exe /batteryreport /output <Bericht>' 'nein' $null 120 'wenige Sekunden' $false $null 'oem' 'akku'
 $script:MorpheusWartungKatalog['powercfg.schlaf'] = MorpheusWartungEintrag 'Energieberichte' 3 'diagnose' 'Schlafstudie erstellen' 'Zeigt, was den PC im Standby geweckt oder Strom verbraucht hat. Braucht Modern Standby.' 'powercfg.exe' '/sleepstudy /output {BERICHT}' 'powercfg.exe /sleepstudy /output <Bericht>' 'nein' $null 120 'wenige Sekunden' $false $null 'oem' 'schlaf'
-$script:MorpheusWartungKatalog['winget.upgrade'] = MorpheusWartungEintrag 'Programme' 1 'reparatur' 'Programme mit winget aktualisieren' 'Aktualisiert die ausgewählten Programme mit dem Windows-Paketmanager winget aus den Herstellerquellen.' 'winget' $script:MorpheusWartungWingetArgs 'winget upgrade --id <Paket-Id> --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity' 'nach-paket' 'ids' 1800 'je Programm 1 bis 10 Minuten' $true 'Programme vorher schließen. Ein Programm-Update lässt sich nicht zurücknehmen.' 'utf8'
+$script:MorpheusWartungKatalog['winget.upgrade'] = MorpheusWartungEintrag 'Programme' 1 'reparatur' 'Programme mit winget aktualisieren' 'Aktualisiert die ausgewählten Programme mit dem Windows-Paketmanager winget aus den Herstellerquellen. winget läuft dabei ohne Adminrechte; braucht ein Programm Adminrechte, fragt Windows selbst nach.' 'winget' $script:MorpheusWartungWingetArgs 'winget upgrade --id <Paket-Id> --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity' 'nach-paket' 'ids' 1800 'je Programm 1 bis 10 Minuten' $true 'Programme vorher schließen. Ein Programm-Update lässt sich nicht zurücknehmen. Fragt Windows nach Adminrechten, den angezeigten Herausgeber prüfen.' 'utf8'
 
 # Standard-Implementierungen (Tests ersetzen die Einträge)
 if (-not $script:MorpheusWartungImpl) {
@@ -79,6 +80,12 @@ if (-not $script:MorpheusWartungImpl) {
         Laufwerke  = { Get-MorpheusWartungLaufwerke }
         Ohne       = { param($Datei, $Argumente) Start-Process -FilePath $Datei -ArgumentList $Argumente | Out-Null }
         WingetPfad = { Get-MorpheusWingetPfad }
+        # winget ohne Adminrechte (2.5, #67): fehlt WingetBenutzer.ps1, startet nichts (kein Rückfall auf Adminrechte)
+        WingetBenutzer = {
+            param($Datei, $Argumente, $ZeitlimitSek, $Zeile)
+            if (-not (Get-Command -Name Invoke-MorpheusWingetBenutzer -CommandType Function -ErrorAction SilentlyContinue)) { throw 'gui\lib\WingetBenutzer.ps1 fehlt; winget wird nicht mit Adminrechten gestartet.' }
+            Invoke-MorpheusWingetBenutzer -WingetPfad $Datei -Argumente $Argumente -ZeitlimitSek $ZeitlimitSek -Zeile $Zeile
+        }
         Jetzt      = { Get-Date }
     }
 }
@@ -664,15 +671,9 @@ function MorpheusWartungLaufWinget {
     $datei = [string]$w.pfad
     if (-not (MorpheusWartungVorPunkt $Res $Ctx $K $OhnePunkt)) { return }
 
-    # WinGet-Ordner in TEMP vorab mit Rechten nur für Administratoren und SYSTEM anlegen (W11/G3); Fehler stoppt nichts
-    $ordnerFunktionen = ((Get-Command -Name Initialize-MorpheusWingetOrdner -CommandType Function -ErrorAction SilentlyContinue) -and (Get-Command -Name Test-MorpheusWingetOrdner -CommandType Function -ErrorAction SilentlyContinue))
-    if ($ordnerFunktionen) {
-        try {
-            $io = Initialize-MorpheusWingetOrdner
-            if ($io.ok) { MorpheusWartungLog 'WinGet-Ordner vorbereitet (nur Administratoren und SYSTEM).' }
-            else { MorpheusWartungLog ('WinGet-Ordner ließ sich nicht vorbereiten: ' + [string]$io.meldung) }
-        } catch { MorpheusWartungLog ('WinGet-Ordner ließ sich nicht vorbereiten: ' + $_.Exception.Message) }
-    }
+    # winget läuft ohne Adminrechte (2.5, #67, G3): Installer, die Adminrechte brauchen, fragen selbst per Windows-Abfrage
+    $Res.benutzerkontext = $true
+    MorpheusWartungLog 'winget läuft ohne Adminrechte. Braucht ein Programm Adminrechte, fragt Windows selbst nach: Herausgeber prüfen.'
 
     $abgebrochen = $false
     $n = @($Pakete).Count
@@ -709,7 +710,7 @@ function MorpheusWartungLaufWinget {
         $logger = MorpheusWartungNeuerZeilenLogger
         $r = $null
         try {
-            $r = & $script:MorpheusWartungImpl.Prozess $datei $argz $K.Kodierung $null $K.ZeitlimitSek $logger.Block
+            $r = & $script:MorpheusWartungImpl.WingetBenutzer $datei $argz $K.ZeitlimitSek $logger.Block
         } catch {
             $eintrag.status = 'fehlgeschlagen'
             $eintrag.text = 'Das Programm ließ sich nicht starten oder lesen: ' + $_.Exception.Message
@@ -723,6 +724,9 @@ function MorpheusWartungLaufWinget {
         if ($r.zeitueberschritten) {
             $eintrag.status = 'fehlgeschlagen'
             $eintrag.text = 'Zeitlimit überschritten; winget wurde beendet.'
+        } elseif ($null -eq $r.exitCode) {
+            $eintrag.status = 'fehlgeschlagen'
+            $eintrag.text = $(if ($r.fehler) { [string]$r.fehler } else { 'winget hat kein Ergebnis gemeldet.' })
         } else {
             $e = $null
             if (Get-Command -Name Get-MorpheusWingetErgebnis -ErrorAction SilentlyContinue) { try { $e = Get-MorpheusWingetErgebnis -ExitCode $r.exitCode } catch { $e = $null } }
@@ -749,16 +753,7 @@ function MorpheusWartungLaufWinget {
     $text = '{0} von {1} Programmen erledigt, {2} nicht aktualisiert.' -f $ok, $n, $fehler
     if ($nichtGestartet -gt 0) { $text += " $nichtGestartet nicht gestartet (abgebrochen)." }
     $erg = $(if ($fehler -gt 0) { 'problem' } elseif ($abgebrochen) { 'unbekannt' } else { 'ok' })
-    $details = @()
-    $Res.wingetOrdner = $null
-    if ($ordnerFunktionen) {
-        try {
-            $wo = Test-MorpheusWingetOrdner
-            $Res.wingetOrdner = [ordered]@{ gehalten = [bool]$wo.gehalten; konten = @($wo.konten); text = [string]$wo.text }
-            MorpheusWartungLog ([string]$wo.text)
-            $details += [string]$wo.text
-        } catch { MorpheusWartungLog ('WinGet-Ordner ließ sich nicht prüfen: ' + $_.Exception.Message) }
-    }
+    $details = @('winget lief ohne Adminrechte (Benutzerkontext).')
     $Res.zusammenfassung = [ordered]@{ ergebnis = $erg; text = $text; empfehlung = $null; details = @($details) }
     $Res.meldung = $text
     MorpheusWartungLog ('Ergebnis: ' + $text)
@@ -807,7 +802,7 @@ function Invoke-MorpheusWartung {
         werkzeug = $Werkzeug; titel = $k.Titel; klasse = $k.Klasse; status = 'fehlgeschlagen'
         befehl = $k.Anzeige; laufwerk = $(if ($Laufwerk) { $Laufwerk } else { $null })
         exitCode = $null; dauerSek = 0; zusammenfassung = $null; punkt = $null; ohnePunkt = $false
-        meldung = ''; bericht = $null; journal = $null; pakete = @()
+        meldung = ''; bericht = $null; journal = $null; pakete = @(); benutzerkontext = $false
     }
     try {
         if ($Werkzeug -ceq 'wiederherstellung.punkt') {

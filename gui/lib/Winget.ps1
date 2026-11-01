@@ -13,6 +13,8 @@
     - Exit-Codes nach winget-cli doc\windows\package-manager\winget\returnCodes.md (APPINSTALLER_CLI_ERROR_*, geprüft
       gegen https://github.com/microsoft/winget-cli, Stand 10/2026); unbekannte Codes werden mit Dezimal- und Hexwert gemeldet.
     - Fortschritt nur über Write-Information, einzige Pipeline-Ausgabe ist das Ergebnis.
+    - Updates installieren nur über Invoke-MorpheusWingetBenutzer (WingetBenutzer.ps1, 2.5): winget läuft dabei ohne
+      Adminrechte. Seit 2.5.0 (Test C) auch die Update-Suche; Morpheus startet winget nie mit Adminrechten.
 #>
 
 # Sichere Pfade (winget-Suche) aus Systempfade.ps1, falls ihre Funktionen fehlen
@@ -20,27 +22,22 @@ if (-not (Get-Command -Name Get-MorpheusWinget -CommandType Function -ErrorActio
     $__gSysPfade = Join-Path $PSScriptRoot 'Systempfade.ps1'
     if (Test-Path -LiteralPath $__gSysPfade -PathType Leaf) { . $__gSysPfade }
 }
+# winget ohne Adminrechte (2.5, #67) aus WingetBenutzer.ps1
+if (-not (Get-Command -Name Invoke-MorpheusWingetBenutzer -CommandType Function -ErrorAction SilentlyContinue)) {
+    $__gBenutzer = Join-Path $PSScriptRoot 'WingetBenutzer.ps1'
+    if (Test-Path -LiteralPath $__gBenutzer -PathType Leaf) { . $__gBenutzer }
+}
 
 if (-not $script:MorpheusWingetImpl) {
     $script:MorpheusWingetImpl = @{
+        # Auch die Suche läuft ohne Adminrechte (2.5.0, Test C): Mit Adminrechten aktualisierte winget die Paketquelle aus
+        # Morpheus' Temp-Ordner (nur Administratoren). Solange der Ordner bestand, scheiterte winget ohne Adminrechte
+        # mit 0x80070005 (Access is denied).
         Ausfuehren = {
             param($Pfad, $Argumente, $ZeitlimitMs)
-            $psi = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName = $Pfad
-            $psi.Arguments = $Argumente
-            $psi.UseShellExecute = $false
-            $psi.RedirectStandardOutput = $true
-            $psi.RedirectStandardError = $true
-            $psi.CreateNoWindow = $true
-            $psi.StandardOutputEncoding = [Text.Encoding]::UTF8
-            $proc = [Diagnostics.Process]::Start($psi)
-            $stdout = $proc.StandardOutput.ReadToEndAsync()
-            $stderr = $proc.StandardError.ReadToEndAsync()
-            if (-not $proc.WaitForExit([int]$ZeitlimitMs)) {
-                try { $proc.Kill() } catch { }
-                return [pscustomobject]@{ text = ''; fehlerText = ''; exitCode = $null; zeitueberschritten = $true }
-            }
-            [pscustomobject]@{ text = [string]$stdout.Result; fehlerText = [string]$stderr.Result; exitCode = $proc.ExitCode; zeitueberschritten = $false }
+            if (-not (Get-Command -Name Invoke-MorpheusWingetBenutzer -CommandType Function -ErrorAction SilentlyContinue)) { throw 'gui\lib\WingetBenutzer.ps1 fehlt; winget wird nicht mit Adminrechten gestartet.' }
+            $r = Invoke-MorpheusWingetBenutzer -WingetPfad $Pfad -Argumente $Argumente -ZeitlimitSek ([int][math]::Ceiling([int]$ZeitlimitMs / 1000))
+            [pscustomobject]@{ text = [string]$r.text; fehlerText = [string]$r.fehler; exitCode = $r.exitCode; zeitueberschritten = [bool]$r.zeitueberschritten }
         }
         ArpNamen   = {
             @(foreach ($k in 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*') {
@@ -195,7 +192,7 @@ function Get-MorpheusWingetErgebnis {
     [uint32]$u = [uint32]($ExitCode -band 0xFFFFFFFFL)
     switch ([BitConverter]::ToInt32([BitConverter]::GetBytes($u), 0)) {
         0x8A150101 { return (& $e 'laeuft-noch' 'Das Programm läuft noch und muss geschlossen werden.') }
-        0x8A150006 { return (& $e 'fehlgeschlagen' 'Der Installer konnte nicht gestartet werden (ShellExecute fehlgeschlagen).') }
+        0x8A150006 { return (& $e 'fehlgeschlagen' 'Der Installer konnte nicht gestartet werden (z. B. Windows-Abfrage nach Adminrechten abgelehnt).') }
         0x8A150111 { return (& $e 'laeuft-noch' 'Das Programm wird gerade von einer Anwendung verwendet und muss geschlossen werden.') }
         0x8A150103 { return (& $e 'laeuft-noch' 'Eine Datei des Programms ist in Benutzung; das Programm muss geschlossen werden.') }
         0x8A150109 { return (& $e 'neustart' 'Aktualisiert; ein Neustart ist nötig, um die Installation abzuschließen.') }
@@ -222,157 +219,3 @@ function Get-MorpheusWingetErgebnis {
     }
     & $e 'fehlgeschlagen' ('winget-Fehlercode {0} (0x{1:X8})' -f $ExitCode, $u)
 }
-
-#region WinGet-Ordner in TEMP absichern (2.4, Befund G3 / W11)
-
-# winget lädt Installer nach <Temp>\WinGet\<Paket> und gibt den Ordner dem Benutzer frei. Ein Benutzerprogramm könnte einen
-# Installer zwischen Hashprüfung und Start tauschen. Morpheus legt den Ordner deshalb vor jedem installierenden winget-Lauf
-# selbst an (nur Administratoren und SYSTEM) und prüft danach, ob die Rechte gehalten haben.
-# Der Pfad kommt aus [IO.Path]::GetTempPath() (liest TEMP; in GUI-Jobs und im Scan ist das der gesicherte Ordner
-# C:\ProgramData\Morpheus\temp\<PID>), nicht aus $env:TEMP. Alle Rechteprüfungen arbeiten mit SIDs.
-# Testhilfe $script:MorpheusWingetOrdnerImpl: IstAdmin (Scriptblock) ersetzt die Adminprüfung; ZusatzVertraut (SIDs, z. B. der
-# Testbenutzer) gilt zusätzlich als vertrauenswürdig und bekommt beim Anlegen ebenfalls Vollzugriff. Produktiv: IstAdmin
-# echt, ZusatzVertraut leer.
-if (-not $script:MorpheusWingetOrdnerImpl) {
-    $script:MorpheusWingetOrdnerImpl = @{
-        IstAdmin       = {
-            try { ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
-            catch { $false }
-        }
-        ZusatzVertraut = @()
-    }
-}
-
-$script:WgSidAdmins = 'S-1-5-32-544'
-$script:WgSidSystem = 'S-1-5-18'
-$script:WgSidTrustedInstaller = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
-
-function MorpheusWingetOrdnerPfad {
-    param([string]$TempPfad)
-    if (-not $TempPfad) { $TempPfad = [IO.Path]::GetTempPath() }
-    Join-Path $TempPfad 'WinGet'
-}
-
-function MorpheusWingetOrdnerVertraut {
-    @($script:WgSidAdmins, $script:WgSidSystem, $script:WgSidTrustedInstaller) + @($script:MorpheusWingetOrdnerImpl.ZusatzVertraut | Where-Object { $_ })
-}
-
-# Löscht den Inhalt eines Ordners mit eigenem Stapel. Reparse Points werden nie betreten, nur selbst entfernt.
-function MorpheusWingetOrdnerLeeren {
-    param([string]$Pfad)
-    $ordner = New-Object System.Collections.Generic.List[string]
-    $stapel = New-Object System.Collections.Generic.Stack[string]
-    $stapel.Push($Pfad)
-    while ($stapel.Count -gt 0) {
-        $akt = $stapel.Pop()
-        $ordner.Add($akt)
-        foreach ($e in (New-Object IO.DirectoryInfo $akt).GetFileSystemInfos()) {
-            $istLink = (($e.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
-            $istDir = (($e.Attributes -band [IO.FileAttributes]::Directory) -ne 0)
-            if ($istLink) {
-                if ($istDir) { [IO.Directory]::Delete($e.FullName, $false) }
-                else { [IO.File]::SetAttributes($e.FullName, [IO.FileAttributes]::Normal); [IO.File]::Delete($e.FullName) }
-            }
-            elseif ($istDir) { $stapel.Push($e.FullName) }
-            else { [IO.File]::SetAttributes($e.FullName, [IO.FileAttributes]::Normal); [IO.File]::Delete($e.FullName) }
-        }
-    }
-    # tiefste Ordner zuerst; der Wurzelordner selbst (Index 0) wird vom Aufrufer entfernt
-    for ($i = $ordner.Count - 1; $i -ge 1; $i--) { [IO.Directory]::Delete($ordner[$i], $false) }
-}
-
-function Test-MorpheusWingetOrdner {
-    [CmdletBinding()]
-    param([string]$TempPfad)
-    $pfad = MorpheusWingetOrdnerPfad -TempPfad $TempPfad
-    $res = [ordered]@{ pfad = $pfad; vorhanden = $false; gehalten = $true; konten = @(); text = '' }
-    if (-not [IO.Directory]::Exists($pfad)) {
-        $res.text = 'WinGet-Ordner: nicht vorhanden (winget hat ihn nicht benutzt).'
-        return [pscustomobject]$res
-    }
-    $res.vorhanden = $true
-    $vertraut = @(MorpheusWingetOrdnerVertraut)
-    $fremd = New-Object System.Collections.Generic.List[string]
-    $stapel = New-Object System.Collections.Generic.Stack[string]
-    $stapel.Push($pfad)
-    $pruefe = {
-        param($Objekt)
-        try {
-            $acl = $Objekt.GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
-            foreach ($r in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
-                if ($r.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
-                if (($r.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0) { continue }
-                $sid = $r.IdentityReference.Value
-                if ($vertraut -contains $sid) { continue }
-                $name = $sid
-                try { $name = $r.IdentityReference.Translate([Security.Principal.NTAccount]).Value } catch { $name = $sid }
-                if (-not $fremd.Contains($name)) { $fremd.Add($name) }
-            }
-        }
-        catch {
-            if (-not $fremd.Contains('nicht lesbar')) { $fremd.Add('nicht lesbar') }
-        }
-    }
-    while ($stapel.Count -gt 0) {
-        $akt = $stapel.Pop()
-        $di = New-Object IO.DirectoryInfo $akt
-        & $pruefe $di
-        $eintraege = @()
-        try { $eintraege = @($di.GetFileSystemInfos()) } catch { if (-not $fremd.Contains('nicht lesbar')) { $fremd.Add('nicht lesbar') } }
-        foreach ($e in $eintraege) {
-            if (($e.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                if (-not $fremd.Contains('Verknüpfung')) { $fremd.Add('Verknüpfung') }
-                continue
-            }
-            if (($e.Attributes -band [IO.FileAttributes]::Directory) -ne 0) { $stapel.Push($e.FullName) }
-            else { & $pruefe $e }
-        }
-    }
-    $res.konten = @($fremd)
-    $res.gehalten = ($fremd.Count -eq 0)
-    if ($res.gehalten) { $res.text = 'WinGet-Ordner: Rechte gehalten (nur Administratoren und SYSTEM).' }
-    else { $res.text = 'WinGet hat den Ordner für ' + ($fremd -join ', ') + ' freigegeben.' }
-    [pscustomobject]$res
-}
-
-function Initialize-MorpheusWingetOrdner {
-    [CmdletBinding()]
-    param([string]$TempPfad)
-    $pfad = MorpheusWingetOrdnerPfad -TempPfad $TempPfad
-    $res = [ordered]@{ pfad = $pfad; ok = $false; meldung = '' }
-    try {
-        if ([IO.Directory]::Exists($pfad)) {
-            $attr = [IO.File]::GetAttributes($pfad)
-            if (($attr -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                # Verknüpfung: nur den Link entfernen, das Ziel bleibt unberührt
-                [IO.Directory]::Delete($pfad, $false)
-            }
-            else {
-                MorpheusWingetOrdnerLeeren -Pfad $pfad
-                [IO.Directory]::Delete($pfad, $false)
-            }
-        }
-        elseif ([IO.File]::Exists($pfad)) { [IO.File]::Delete($pfad) }
-        $admin = [bool](& $script:MorpheusWingetOrdnerImpl.IstAdmin)
-        $ds = New-Object Security.AccessControl.DirectorySecurity
-        $ds.SetAccessRuleProtection($true, $false)
-        if ($admin) { $ds.SetOwner((New-Object Security.Principal.SecurityIdentifier $script:WgSidAdmins)) }
-        $erb = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
-        $keine = [Security.AccessControl.PropagationFlags]::None
-        $erlaubt = [Security.AccessControl.AccessControlType]::Allow
-        foreach ($sid in (@($script:WgSidAdmins, $script:WgSidSystem) + @($script:MorpheusWingetOrdnerImpl.ZusatzVertraut | Where-Object { $_ }))) {
-            $ds.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier $sid), [Security.AccessControl.FileSystemRights]::FullControl, $erb, $keine, $erlaubt)))
-        }
-        [void][IO.Directory]::CreateDirectory($pfad, $ds)
-        $t = Test-MorpheusWingetOrdner -TempPfad $TempPfad
-        if ($t.gehalten) { $res.ok = $true; $res.meldung = 'WinGet-Ordner angelegt (nur Administratoren und SYSTEM).' }
-        else { $res.meldung = 'WinGet-Ordner hat nach dem Anlegen fremde Rechte: ' + ($t.konten -join ', ') }
-    }
-    catch {
-        $res.ok = $false
-        $res.meldung = $_.Exception.Message
-    }
-    [pscustomobject]$res
-}
-
-#endregion
